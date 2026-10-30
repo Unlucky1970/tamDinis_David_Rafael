@@ -167,9 +167,9 @@ fun textoPerfil(perfil: String?): String = when (perfil) {
 }
 
 fun descricaoPerfil(perfil: String): String = when (perfil) {
-    "admin" -> "Entra a qualquer hora, fecha qualquer aula e gere tudo na app"
-    "funcionario" -> "Horario alargado, pode fechar qualquer aula"
-    "docente" -> "So no seu horario, so fecha a aula que abriu"
+    "admin" -> "Unico com conta na app. Entra a qualquer hora e fecha qualquer aula"
+    "funcionario" -> "So cartao. Horario alargado, pode fechar qualquer aula"
+    "docente" -> "So cartao. Entra no seu horario e so fecha a aula que abriu"
     else -> ""
 }
 

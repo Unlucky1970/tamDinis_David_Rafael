@@ -1,6 +1,8 @@
 package pt.smartaccess.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,11 +10,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
@@ -34,7 +40,7 @@ fun AlertasScreen(snackbar: SnackbarHostState, viewModel: AlertasViewModel) {
 
     ConteudoCarregado(estado, viewModel::recarregar) { alertas ->
         if (alertas.isEmpty()) {
-            MensagemVazia("Sem alertas")
+            EstadoVazio(Icons.Default.CheckCircle, "Sem alertas", "Esta tudo em ordem.")
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -51,7 +57,7 @@ fun AlertasScreen(snackbar: SnackbarHostState, viewModel: AlertasViewModel) {
 
 private fun tituloAlerta(tipo: String): String = when (tipo) {
     "tentativas_negadas" -> "Tentativas de acesso negadas"
-    "dispositivo_offline" -> "Dispositivo offline"
+    "dispositivo_offline" -> "Porta sem contacto"
     "entrada_sem_acesso" -> "Entrada com a sala fechada"
     "dispositivo_novo" -> "Porta nova por aprovar"
     else -> tipo
@@ -59,28 +65,37 @@ private fun tituloAlerta(tipo: String): String = when (tipo) {
 
 @Composable
 private fun CartaoAlerta(alerta: Alerta, aoResolver: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = if (alerta.resolvido) {
-            CardDefaults.cardColors()
-        } else {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-        },
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(tituloAlerta(alerta.tipo), style = MaterialTheme.typography.titleMedium)
-            Text(alerta.descricao, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(formatarData(alerta.dataHora), style = MaterialTheme.typography.bodySmall)
-                if (alerta.resolvido) {
-                    Text("Resolvido", style = MaterialTheme.typography.labelLarge)
-                } else {
-                    OutlinedButton(onClick = aoResolver) { Text("Resolver") }
+    val c = MaterialTheme.colorScheme
+    // Porta nova e um aviso (ambar); o resto sao problemas (vermelho)
+    val (fundo, cor) = when {
+        alerta.resolvido -> c.surfaceContainerHighest to c.onSurfaceVariant
+        alerta.tipo == "dispositivo_novo" -> c.tertiaryContainer to c.onTertiaryContainer
+        else -> c.errorContainer to c.onErrorContainer
+    }
+    CartaoLista {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(40.dp).background(fundo, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(
+                    if (alerta.resolvido) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    contentDescription = null, tint = cor, modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(tituloAlerta(alerta.tipo), style = MaterialTheme.typography.titleMedium)
+                Text(alerta.descricao, style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(formatarData(alerta.dataHora), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant)
+                    if (alerta.resolvido) {
+                        Etiqueta("Resolvido", c.surfaceContainerHighest, c.onSurfaceVariant)
+                    } else {
+                        OutlinedButton(onClick = aoResolver) { Text("Resolver") }
+                    }
                 }
             }
         }

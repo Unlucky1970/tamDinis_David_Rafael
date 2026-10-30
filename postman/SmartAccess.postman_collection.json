@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "SmartAccess API",
-    "description": "Testes da API SmartAccess (Flask no Vercel).\n\nOrdem sugerida:\n1. **App > Login admin**: o token fica guardado em `token` e e usado na pasta App.\n2. **Arduino > Registar dispositivo de teste**: simula um Arduino novo; a chave fica guardada em `apiKey`.\n3. **App > Dispositivos > Dispositivos** e depois **Aprovar dispositivo**.\n4. A partir dai a pasta **Arduino** funciona como um Arduino real.\n\nOs ids (`dispositivoId`, `comandoId`, `cartaoId`, `alertaId`, `utilizadorId`) sao guardados pelos pedidos que os devolvem; podes muda-los em *Variables*.\n\nPerfis: admin (docente administrador), funcionario, docente.",
+    "description": "Testes da API SmartAccess (Flask no Vercel).\n\nSo o administrador tem conta na app; docentes e funcionarios sao so um nome associado ao cartao.\n\nOrdem sugerida:\n1. **App > Login admin**: o token fica guardado em `token` e e usado na pasta App.\n2. **Arduino > Registar dispositivo de teste**: simula um Arduino novo; a chave fica guardada em `apiKey`.\n3. **App > Dispositivos > Dispositivos** e depois **Aprovar dispositivo**.\n4. A partir dai a pasta **Arduino** funciona como um Arduino real.\n\nOs ids (`dispositivoId`, `comandoId`, `cartaoId`, `alertaId`, `utilizadorId`) sao guardados pelos pedidos que os devolvem; podes muda-los em *Variables*.\n\nPerfis: admin (docente administrador), funcionario, docente.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -168,32 +168,6 @@
               }
             },
             {
-              "name": "Login funcionario",
-              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-                "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
-              ] } }],
-              "request": {
-                "auth": { "type": "noauth" },
-                "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\"email\":\"funcionario@smartaccess.pt\",\"password\":\"func123\"}", "options": { "raw": { "language": "json" } } },
-                "url": "{{baseUrl}}/api/auth/login"
-              }
-            },
-            {
-              "name": "Login docente",
-              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-                "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
-              ] } }],
-              "request": {
-                "auth": { "type": "noauth" },
-                "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\"email\":\"docente@smartaccess.pt\",\"password\":\"doc123\"}", "options": { "raw": { "language": "json" } } },
-                "url": "{{baseUrl}}/api/auth/login"
-              }
-            },
-            {
               "name": "Eu (utilizador autenticado)",
               "request": { "method": "GET", "url": "{{baseUrl}}/api/me" }
             }
@@ -273,6 +247,18 @@
             {
               "name": "Cartoes",
               "request": { "method": "GET", "url": "{{baseUrl}}/api/cards" }
+            },
+            {
+              "name": "Adicionar cartao pelo UID (associado a uma pessoa)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 201) pm.collectionVariables.set('cartaoId', pm.response.json().id);"
+              ] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"uid\":\"4A7B2C91\",\"utilizador_id\":{{utilizadorId}}}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/cards"
+              }
             },
             {
               "name": "Cartoes pendentes",
@@ -381,19 +367,40 @@
               "request": { "method": "GET", "url": "{{baseUrl}}/api/users" }
             },
             {
-              "name": "Criar funcionario",
+              "name": "Criar docente (so nome, sem conta)",
               "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
                 "if (pm.response.code === 201) pm.collectionVariables.set('utilizadorId', pm.response.json().id);"
               ] } }],
               "request": {
                 "method": "POST",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\"nome\":\"Novo Funcionario\",\"email\":\"novo.funcionario@smartaccess.pt\",\"password\":\"func123\",\"perfil\":\"funcionario\"}", "options": { "raw": { "language": "json" } } },
+                "body": { "mode": "raw", "raw": "{\"nome\":\"Rui Costa\",\"perfil\":\"docente\"}", "options": { "raw": { "language": "json" } } },
                 "url": "{{baseUrl}}/api/users"
               }
             },
             {
-              "name": "Mudar perfil do utilizador",
+              "name": "Criar funcionario (so nome, sem conta)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 201) pm.collectionVariables.set('utilizadorId', pm.response.json().id);"
+              ] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"nome\":\"Marta Silva\",\"perfil\":\"funcionario\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/users"
+              }
+            },
+            {
+              "name": "Criar administrador (com conta na app)",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"nome\":\"Segundo Admin\",\"perfil\":\"admin\",\"email\":\"admin2@smartaccess.pt\",\"password\":\"admin456\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/users"
+              }
+            },
+            {
+              "name": "Mudar perfil (docente/funcionario)",
               "request": {
                 "method": "PATCH",
                 "header": [{ "key": "Content-Type", "value": "application/json" }],

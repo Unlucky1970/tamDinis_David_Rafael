@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -42,6 +43,23 @@ class SessaoViewModel(aplicacao: Application) : AndroidViewModel(aplicacao) {
 
     init {
         SmartAccessApi.aoExpirarSessao = { sair() }
+        atualizarPerfil()
+    }
+
+    // O perfil fica guardado desde o login: se um admin o mudar entretanto (ou a base for atualizada),
+    // a app mostraria os separadores errados. Pede os dados atuais a API sempre que a app arranca.
+    fun atualizarPerfil() {
+        viewModelScope.launch {
+            val atual = (sessao.first { it != EstadoSessao.ACarregar } as? EstadoSessao.Ativa)?.dados ?: return@launch
+            try {
+                val utilizador = api.eu()
+                if (utilizador != atual.utilizador) store.guardar(atual.copy(utilizador = utilizador))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // sem rede: fica o perfil guardado (um 401 ja termina a sessao pelo interceptor)
+            }
+        }
     }
 
     fun entrar(email: String, password: String) {

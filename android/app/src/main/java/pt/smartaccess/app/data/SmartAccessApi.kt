@@ -19,6 +19,9 @@ interface SmartAccessApi {
     @POST("api/auth/login")
     suspend fun login(@Body pedido: PedidoLogin): RespostaLogin
 
+    @GET("api/me")
+    suspend fun eu(): Utilizador
+
     @GET("api/status")
     suspend fun estado(): List<Dispositivo>
 
@@ -40,6 +43,9 @@ interface SmartAccessApi {
 
     @GET("api/cards")
     suspend fun cartoes(): List<Cartao>
+
+    @POST("api/cards")
+    suspend fun criarCartao(@Body novo: NovoCartao): Cartao
 
     @PATCH("api/cards/{id}")
     suspend fun alterarCartao(@Path("id") id: Long, @Body alteracao: AlteracaoCartao): Cartao

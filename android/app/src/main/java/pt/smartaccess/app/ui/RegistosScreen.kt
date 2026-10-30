@@ -24,8 +24,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pt.smartaccess.app.data.Registo
@@ -80,7 +81,7 @@ fun RegistosScreen(utilizador: Utilizador, snackbar: SnackbarHostState, viewMode
 
         ConteudoCarregado(estado, viewModel::recarregar) { registos ->
             if (registos.isEmpty()) {
-                MensagemVazia("Sem registos para estes filtros")
+                EstadoVazio(Icons.AutoMirrored.Filled.List, "Sem registos", "Experimente outro periodo ou filtro.")
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(registos, key = { it.id }) { registo ->
@@ -104,7 +105,7 @@ private fun FiltroUtilizador(
         FilterChip(
             selected = selecionado != null,
             onClick = { aberto = true },
-            label = { Text(selecionado?.nome ?: "Utilizador") },
+            label = { Text(selecionado?.nome ?: "Pessoa") },
         )
         DropdownMenu(expanded = aberto, onDismissRequest = { aberto = false }) {
             DropdownMenuItem(text = { Text("Todos") }, onClick = {
@@ -127,20 +128,20 @@ private fun LinhaRegisto(registo: Registo) {
         add(formatarData(registo.dataHora))
         add(registo.dispositivo)
         if (registo.origem == "remoto") add("remoto")
-        if (!registo.concedido) add(textoMotivo(registo.motivo))
-        if (registo.concedido && registo.origem == "cartao") {
-            add(if (registo.entradas > 0) "entrou" else "sem entrada detetada")
+        registo.motivo?.let { add(textoMotivo(it)) }
+        // As entradas ficam ligadas ao acesso que abriu a aula (inicio de aula ou abertura remota)
+        if (registo.motivo == "inicio_aula" || registo.motivo == "abertura_remota") {
+            add(if (registo.entradas > 0) "${registo.entradas} entrada(s) na aula" else "sem entradas detetadas")
         }
     }
+    val c = MaterialTheme.colorScheme
     ListItem(
+        leadingContent = { Avatar(registo.utilizador ?: "?", perfil = null, tamanho = 40.dp) },
         headlineContent = { Text(registo.utilizador ?: "Cartao ${registo.cartaoUid}") },
-        supportingContent = { Text(detalhes.joinToString(" - ")) },
+        supportingContent = { Text(detalhes.joinToString(" - "), color = c.onSurfaceVariant) },
         trailingContent = {
-            Text(
-                if (registo.concedido) "Concedido" else "Negado",
-                color = if (registo.concedido) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.labelLarge,
-            )
+            if (registo.concedido) Etiqueta("Concedido", c.secondaryContainer, c.onSecondaryContainer)
+            else Etiqueta("Negado", c.errorContainer, c.onErrorContainer)
         },
     )
 }

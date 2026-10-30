@@ -6,25 +6,31 @@
 --  UTILIZADORES E HORARIOS
 -- ======================================================
 -- Perfis:
---   admin        docente administrador: entra a qualquer hora, fecha qualquer aula, gere tudo na app
+--   admin        docente administrador: entra a qualquer hora, fecha qualquer aula, e o UNICO com conta na app
 --   funcionario  horario mais alargado (horarios_perfil), pode fechar qualquer aula
 --   docente      so dentro do seu horario, so fecha a aula que abriu
+-- Funcionarios e docentes sao so um nome associado a um ou mais cartoes (sem email nem palavra-passe).
 CREATE TABLE IF NOT EXISTS utilizadores (
   id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   nome           TEXT        NOT NULL,
-  email          TEXT        NOT NULL,
-  password_hash  TEXT        NOT NULL,               -- bcrypt
+  email          TEXT,                               -- so o admin
+  password_hash  TEXT,                               -- bcrypt, so o admin
   perfil         TEXT        NOT NULL DEFAULT 'docente',
   criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS utilizadores_email_idx ON utilizadores (lower(email));
 
--- Atualizacao: o antigo perfil 'utilizador' passa a 'docente'
+-- Atualizacao: o antigo perfil 'utilizador' passa a 'docente'; so o admin precisa de email e palavra-passe
 ALTER TABLE utilizadores DROP CONSTRAINT IF EXISTS perfil_valido;
 UPDATE utilizadores SET perfil = 'docente' WHERE perfil = 'utilizador';
 ALTER TABLE utilizadores ALTER COLUMN perfil SET DEFAULT 'docente';
 ALTER TABLE utilizadores ADD CONSTRAINT perfil_valido CHECK (perfil IN ('admin', 'funcionario', 'docente'));
+ALTER TABLE utilizadores ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE utilizadores ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE utilizadores DROP CONSTRAINT IF EXISTS admin_tem_conta;
+ALTER TABLE utilizadores ADD CONSTRAINT admin_tem_conta
+  CHECK (perfil <> 'admin' OR (email IS NOT NULL AND password_hash IS NOT NULL));
 
 -- Horario por omissao de cada perfil (usado quando o cartao nao tem permissoes proprias).
 -- O admin nao precisa: entra sempre.

@@ -74,6 +74,7 @@ String cartoesOffline = "";       // vem da API: cartoes que abrem/fecham sem re
 unsigned long intervaloComandosMs = 5000;   // vem da API
 bool configuracaoRecebida = false;
 bool online = false;
+int ultimoEstadoHttp = 0;         // codigo do ultimo pedido a API (negativo = erro de rede)
 
 unsigned long ultimaConsulta = 0;
 unsigned long ultimaTentativaWiFi = 0;
@@ -134,7 +135,7 @@ void registarLog(const char* tag, const String& mensagem);
 void bip(unsigned int frequencia, unsigned long duracao);
 void lerMemoria();
 void guardarChave(const String& chave);
-void guardarCartoesOffline(const String& lista);
+void guardarCartoesOffline(String lista);
 void apagarChave();
 bool prepararDispositivo();
 bool registarDispositivo();
@@ -343,8 +344,13 @@ void guardarChave(const String& chave) {
 }
 
 // So escreve se mudou (a EEPROM aguenta ~100 000 escritas por byte)
-void guardarCartoesOffline(const String& lista) {
-  if (lista == cartoesOffline || (int)lista.length() > MAX_OFFLINE_TXT) return;
+// Se a lista nao couber, guarda so os primeiros cartoes que cabem inteiros.
+void guardarCartoesOffline(String lista) {
+  if ((int)lista.length() > MAX_OFFLINE_TXT) {
+    lista = lista.substring(0, lista.lastIndexOf(',', MAX_OFFLINE_TXT));
+    registarLog("SISTEMA", "Lista de cartoes sem rede demasiado grande: so ficam os primeiros");
+  }
+  if (lista == cartoesOffline) return;
   cartoesOffline = lista;
   EEPROM.update(EE_OFFLINE, lista.length());
   for (unsigned int i = 0; i < lista.length(); i++) EEPROM.update(EE_OFFLINE + 1 + i, lista[i]);
@@ -419,8 +425,12 @@ bool pedirConfiguracao() {
     registarLog("AULA", "A retomar a aula de " + lerCampoTexto(resposta, "dono") + " que estava a decorrer");
     abrirSala(lerCampoTexto(resposta, "cartao_uid"), lerCampoTexto(resposta, "dono"),
               lerCampoTexto(resposta, "dono_perfil"));
-    entradasAula = lerCampoNumero(resposta, "entradas");
-    saidasAula = lerCampoNumero(resposta, "saidas");
+    entradasAula = max(0L, lerCampoNumero(resposta, "entradas"));
+    saidasAula = max(0L, lerCampoNumero(resposta, "saidas"));
+  } else if (resposta.indexOf("\"aula\":null") >= 0 && aulaAberta && numPendentes == 0) {
+    // A aula foi fechada na API enquanto a porta estava sem contacto: tranca para ficar igual
+    registarLog("AULA", "A API ja nao tem esta aula aberta - a trancar");
+    fecharSala("Fechada na API");
   }
   ultimaConsulta = millis();
   if (mensagemEm == 0) mostrarRepouso();
@@ -459,6 +469,13 @@ void tratarCartao(String uid) {
     registarLog("CARTAO", estadoDispositivo == PENDENTE ? "Ignorado: porta ainda nao aprovada na app"
                                                          : "Ignorado: porta revogada na app");
     acessoNegado(estadoDispositivo == PENDENTE ? "Porta por aprovar" : "Porta revogada");
+    return;
+  }
+
+  // Ainda sem chave (registo falhou ou esta a decorrer): a API recusaria o pedido, usa o modo sem rede
+  if (apiKey[0] == '\0') {
+    registarLog("CARTAO", "Porta ainda sem registo na API - modo sem rede");
+    tratarSemRede(uid);
     return;
   }
 
@@ -810,6 +827,12 @@ void enviarPendentes() {
     if (e.tipo == 'E' || e.tipo == 'S') ok = enviarPassagem(e.tipo == 'E' ? "entrada" : "saida");
     else if (e.tipo == 'A') ok = enviarEvento(String("{\"tipo\":\"porta\",\"aberta\":true,\"uid\":\"") + e.uid + "\"}");
     else ok = enviarEvento("{\"tipo\":\"porta\",\"aberta\":false}");
+    // A API recusou o evento (ex.: cartao que entretanto foi apagado): repetir nao adianta, descarta-o.
+    // Sem rede, erro do servidor ou porta por aprovar (401/403): fica para a proxima tentativa.
+    if (!ok && ultimoEstadoHttp >= 400 && ultimoEstadoHttp < 500 && ultimoEstadoHttp != 401 && ultimoEstadoHttp != 403) {
+      registarLog("API", String("Evento sem rede recusado pela API (codigo ") + ultimoEstadoHttp + ") - descartado");
+      ok = true;
+    }
     if (!ok) break;
     enviados++;
   }
@@ -833,11 +856,13 @@ void consultarComandos() {
   if (online != estavaOnline) {
     registarLog("API", online ? "Ligacao a API restabelecida" : String("Sem ligacao a API (codigo ") + estado + ")");
     if (mensagemEm == 0) mostrarRepouso();
-    if (online) pedirConfiguracao();   // pode ter mudado alguma coisa enquanto estava sem rede
   }
   if (!online) return;
 
+  // Primeiro o que ficou por enviar (ex.: a sala aberta sem rede) e so depois a configuracao,
+  // senao a API ainda nao sabia dessa aula e a porta era trancada por engano
   if (numPendentes > 0) enviarPendentes();
+  if (!estavaOnline) pedirConfiguracao();   // pode ter mudado alguma coisa enquanto estava sem rede
 
   long comandoId = lerCampoNumero(resposta, "id");
   if (comandoId > 0) {
@@ -917,10 +942,12 @@ int pedidoApi(bool post, const char* caminho, const String& corpo, String& respo
     estado = http.responseStatusCode();
     if (estado > 0) {
       resposta = http.responseBody();   // ler a resposta toda deixa a ligacao pronta para o proximo pedido
+      ultimoEstadoHttp = estado;
       return estado;
     }
     http.stop();
   }
+  ultimoEstadoHttp = estado;
   return estado;
 }
 

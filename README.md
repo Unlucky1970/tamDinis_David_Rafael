@@ -19,9 +19,11 @@ android/                 app Android (abrir esta pasta no Android Studio)
 
 | Perfil | Quando entra | O que pode fazer na porta |
 |---|---|---|
-| `admin` (docente administrador) | a qualquer hora | abrir a sala e fechar **qualquer** aula; gere tudo na app |
+| `admin` (docente administrador) | a qualquer hora | abrir a sala e fechar **qualquer** aula; é o **único com conta na app** (email + palavra-passe) |
 | `funcionario` | horário do perfil (por omissão seg–sáb 07:00–23:00) | abrir a sala e fechar **qualquer** aula |
 | `docente` | horário do perfil (por omissão seg–sex 08:00–20:00) | abrir a sala e fechar **só a sua** aula |
+
+Funcionários e docentes não têm conta: são só um nome associado a um ou mais cartões. O admin cria-os na app (*Gestão → Pessoas*) e associa-lhes os cartões (*Gestão → Cartões → Adicionar cartão*, pelo UID, ou aprovando um cartão lido numa porta).
 
 Os horários de cada perfil estão na tabela `horarios_perfil` e mudam-se pela API (`PUT /api/schedules/{perfil}`). Um cartão pode ter um horário próprio (`PUT /api/cards/{id}/permissions`), que substitui o do perfil.
 
@@ -65,11 +67,11 @@ UPDATE dispositivos SET estado = 'revogado' WHERE mac IS NULL;
 
 Dados de teste do `seed.sql` (**mudar antes da entrega**):
 
-| Perfil | Login | Cartão |
-|---|---|---|
-| admin | `admin@smartaccess.pt` / `admin123` | `8DF36E69` |
-| funcionario | `funcionario@smartaccess.pt` / `func123` | – (aprovar um cartão novo e associá-lo) |
-| docente | `docente@smartaccess.pt` / `doc123` | `337A93AA` |
+| Pessoa | Perfil | Login na app | Cartão |
+|---|---|---|---|
+| Administrador | admin | `admin@smartaccess.pt` / `admin123` | `8DF36E69` |
+| Funcionario Teste | funcionario | – | – (associar um cartão na app) |
+| Docente Teste | docente | – | `337A93AA` |
 
 ## 2. API
 
@@ -115,28 +117,30 @@ A coleção `postman/SmartAccess.postman_collection.json` tem todos os pedidos p
 
 Motivos de recusa: `cartao_desconhecido`, `cartao_pendente`, `cartao_revogado`, `fora_do_horario`, `aula_a_decorrer`. Um dispositivo pendente ou revogado recebe 403 `{"detail":...}` em todas as rotas.
 
-**App**: cabeçalho `Authorization: Bearer <token>` (A = só administradores)
+**App** (só administradores): cabeçalho `Authorization: Bearer <token>`
 
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/api/auth/login` | `{"email","password"}` → `{"token","utilizador"}` |
+| POST | `/api/auth/login` | `{"email","password"}` → `{"token","utilizador"}` (403 se não for admin) |
 | GET | `/api/me` | utilizador autenticado |
 | GET | `/api/status` | estado das portas ativas (online, porta, pessoas dentro, último acesso, aula a decorrer) |
-| GET | `/api/devices` (A) | dispositivos (pendentes primeiro) |
-| PATCH | `/api/devices/{id}` (A) | `{"estado":"ativo","nome":"Sala 1.04"}` aprova; `{"estado":"revogado"}` revoga |
-| POST | `/api/door/unlock` (A) | `{"dispositivo_id"}` pede abertura remota → `{"comando_id"}` |
-| GET | `/api/door/commands/{id}` (A) | estado do comando (pendente/executado/expirado) |
-| GET | `/api/classes?limite=` | aulas com entradas/saídas (docente e funcionário só veem as suas) |
-| GET | `/api/logs?desde=&ate=&utilizador_id=&resultado=&limite=` | histórico de acessos (docente e funcionário só veem os seus) |
-| GET | `/api/cards?estado=` (A) | cartões com permissões próprias |
-| PATCH | `/api/cards/{id}` (A) | `{"estado":"ativo","utilizador_id":2}` aprova; `{"estado":"revogado"}` revoga |
-| GET / PUT | `/api/cards/{id}/permissions` (A) | horário próprio do cartão (`[]` volta ao horário do perfil) |
-| GET | `/api/schedules` (A) | horários do docente e do funcionário |
-| PUT | `/api/schedules/{perfil}` (A) | `[{"dia_semana":1,"hora_inicio":"08:00","hora_fim":"20:00"}]` (1 = segunda) |
-| GET | `/api/alerts?resolvido=` (A) | alertas |
-| PATCH | `/api/alerts/{id}` (A) | `{"resolvido":true}` |
-| GET / POST | `/api/users` (A) | listar / criar utilizadores (`perfil`: admin, funcionario ou docente) |
-| PATCH | `/api/users/{id}` (A) | `{"perfil":"funcionario"}` / `{"nome":"..."}` |
+| GET | `/api/devices` | dispositivos (pendentes primeiro) |
+| PATCH | `/api/devices/{id}` | `{"estado":"ativo","nome":"Sala 1.04"}` aprova; `{"estado":"revogado"}` revoga (e fecha a aula aberta) |
+| POST | `/api/door/unlock` | `{"dispositivo_id"}` pede abertura remota → `{"comando_id"}` |
+| GET | `/api/door/commands/{id}` | estado do comando (pendente/executado/expirado) |
+| GET | `/api/classes?limite=` | aulas com entradas/saídas |
+| GET | `/api/logs?desde=&ate=&utilizador_id=&resultado=&limite=` | histórico de acessos |
+| GET | `/api/cards?estado=` | cartões com permissões próprias |
+| POST | `/api/cards` | `{"uid":"4A7B2C91","utilizador_id":2}` adiciona um cartão já associado (um pendente com esse UID fica aprovado) |
+| PATCH | `/api/cards/{id}` | `{"estado":"ativo","utilizador_id":2}` aprova; `{"estado":"revogado"}` revoga |
+| GET / PUT | `/api/cards/{id}/permissions` | horário próprio do cartão (`[]` volta ao horário do perfil) |
+| GET | `/api/schedules` | horários do docente e do funcionário |
+| PUT | `/api/schedules/{perfil}` | `[{"dia_semana":1,"hora_inicio":"08:00","hora_fim":"20:00"}]` (1 = segunda) |
+| GET | `/api/alerts?resolvido=` | alertas |
+| PATCH | `/api/alerts/{id}` | `{"resolvido":true}` |
+| GET | `/api/users` | pessoas (só o admin tem `email`) |
+| POST | `/api/users` | `{"nome","perfil":"docente"}`; para um admin também `"email"` e `"password"` |
+| PATCH | `/api/users/{id}` | `{"perfil":"funcionario"}` / `{"nome":"..."}`; passar a admin exige `email` e `password`, deixar de ser admin apaga a conta |
 
 ## 4. Arduino
 
@@ -197,15 +201,17 @@ Se o HTTPS falhar com código negativo na Rev2, atualizar o firmware do módulo 
    Se o emulador não chegar ao PC, usar `adb reverse tcp:8000 tcp:8000` e `api.url=http://127.0.0.1:8000/`.
 3. *Run*.
 
-Separadores:
+Só os administradores entram na app. Separadores:
 
-| Separador | Quem vê | O que tem |
-|---|---|---|
-| **Painel** | todos | cada porta: online/offline, trancada/aberta, pessoas dentro, aula a decorrer (dono, desde quando, entradas/saídas), último acesso; o admin pode abrir a porta à distância |
-| **Aulas** | todos (docente e funcionário só as suas) | histórico de aulas: porta, dono, duração, entradas, saídas, entradas não detetadas, quem fechou |
-| **Registos** | todos (docente e funcionário só os seus) | acessos com filtros por período, resultado e utilizador |
-| **Gestão** | admin | **Portas** (aprovar Arduinos novos e dar-lhes nome, revogar), **Cartões** (aprovar, revogar, horário próprio), **Pessoas** (criar utilizadores, mudar perfil) e **Horários** (do docente e do funcionário) |
-| **Alertas** | admin | alertas por resolver (inclui portas novas à espera de aprovação) |
+| Separador | O que tem |
+|---|---|
+| **Painel** | cada porta: online/offline, trancada/aberta, pessoas dentro, aula a decorrer (dono, desde quando, entradas/saídas), último acesso com o motivo; abrir a porta à distância |
+| **Aulas** | histórico de aulas: porta, dono, duração, entradas, saídas, entradas não detetadas, quem fechou |
+| **Registos** | acessos com filtros por período, resultado e pessoa |
+| **Gestão** | **Portas** (aprovar Arduinos novos e dar-lhes nome, revogar), **Cartões** (pesquisa por UID ou nome, filtros por estado; adicionar pelo UID, aprovar os lidos nas portas, revogar, horário próprio), **Pessoas** (pesquisa e filtro por perfil; cada pessoa mostra os seus cartões e tem "Associar cartão"; criar docentes/funcionários só com nome, ou admins com conta; mudar perfil) e **Horários** (do docente e do funcionário) |
+
+Ao associar um cartão (em Cartões ou em Pessoas), a pessoa escolhe-se **pesquisando pelo nome**. Se ninguém tiver esse nome, aparece "Criar «nome»": a pessoa é criada ali mesmo (docente ou funcionário) e fica logo com o cartão.
+| **Alertas** | alertas por resolver (inclui portas novas à espera de aprovação) |
 
 ## Por fazer
 

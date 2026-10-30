@@ -30,9 +30,10 @@ class CartoesViewModel(
         }
     }
 
-    fun aprovar(cartao: Cartao, utilizador: Utilizador) =
-        executar("Cartao ${cartao.uid} aprovado para ${utilizador.nome}") {
-            api.alterarCartao(cartao.id, AlteracaoCartao(estado = "ativo", utilizadorId = utilizador.id))
+    // pendente != null: aprova um cartao lido numa porta; null: adiciona um cartao novo pelo UID
+    fun associar(uid: String, escolha: EscolhaPessoa, pendente: Cartao?) =
+        executar("Cartao $uid associado a ${escolha.nome}") {
+            associarCartao(api, uid, escolha, pendente?.id)
         }
 
     fun revogar(cartao: Cartao) =
@@ -46,7 +47,7 @@ class CartoesViewModel(
         }
 
     fun guardarHorarios(cartao: Cartao, permissoes: List<Permissao>) =
-        executar("Horarios guardados") {
+        executar("Horario guardado") {
             api.definirPermissoes(cartao.id, permissoes)
         }
 }

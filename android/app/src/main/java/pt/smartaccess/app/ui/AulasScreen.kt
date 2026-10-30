@@ -9,17 +9,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pt.smartaccess.app.data.Aula
@@ -34,8 +37,9 @@ fun AulasScreen(utilizador: Utilizador, snackbar: SnackbarHostState, viewModel: 
 
     ConteudoCarregado(estado, viewModel::recarregar) { aulas ->
         if (aulas.isEmpty()) {
-            MensagemVazia(
-                if (utilizador.admin) "Ainda nao houve aulas" else "Ainda nao abriu nenhuma aula com o seu cartao"
+            EstadoVazio(
+                Icons.Default.DateRange, "Ainda nao houve aulas",
+                if (utilizador.admin) "Uma aula comeca quando alguem passa o cartao numa porta fechada." else null,
             )
         } else {
             LazyColumn(
@@ -51,40 +55,37 @@ fun AulasScreen(utilizador: Utilizador, snackbar: SnackbarHostState, viewModel: 
 
 @Composable
 private fun CartaoAula(aula: Aula) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = if (aula.aDecorrer) {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        } else {
-            CardDefaults.cardColors()
-        },
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(aula.dispositivo, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (aula.aDecorrer) "A decorrer" else duracao(aula.inicio, aula.fim),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (aula.aDecorrer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
+    val c = MaterialTheme.colorScheme
+    CartaoLista(destaque = if (aula.aDecorrer) c.secondaryContainer.copy(alpha = 0.55f) else null) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(aula.dono, aula.donoPerfil)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(aula.dono ?: "Abertura sem dono", style = MaterialTheme.typography.titleMedium)
+                    Text(aula.dispositivo, style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+                }
+                if (aula.aDecorrer) Etiqueta("A decorrer", c.secondary, c.onSecondary)
+                else Etiqueta(duracao(aula.inicio, aula.fim), c.surfaceContainerHighest, c.onSurfaceVariant)
             }
+            Spacer(Modifier.height(8.dp))
+            // "30/10/2026 09:00 - 10:30"; se acabou noutro dia mostra a data completa do fim
+            val inicio = formatarData(aula.inicio)
+            val fim = aula.fim?.let(::formatarData)
             Text(
-                aula.dono?.let { "$it (${textoPerfil(aula.donoPerfil)})" } ?: "Abertura sem dono",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                formatarData(aula.inicio) + (aula.fim?.let { " - " + formatarData(it).takeLast(5) } ?: ""),
+                inicio + when {
+                    fim == null -> ""
+                    fim.take(10) == inicio.take(10) -> " - " + fim.takeLast(5)
+                    else -> " - $fim"
+                },
                 style = MaterialTheme.typography.bodySmall,
+                color = c.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Contador("Entradas", aula.entradas)
-                Contador("Saidas", aula.saidas)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Contador("Entradas", aula.entradas, Modifier.weight(1f))
+                Contador("Saidas", aula.saidas, Modifier.weight(1f))
             }
 
             if (aula.entradasNaoDetetadas > 0) {
@@ -107,9 +108,11 @@ private fun CartaoAula(aula: Aula) {
 }
 
 @Composable
-private fun Contador(rotulo: String, valor: Int) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(valor.toString(), style = MaterialTheme.typography.headlineSmall)
-        Text(rotulo, style = MaterialTheme.typography.bodySmall)
+private fun Contador(rotulo: String, valor: Int, modifier: Modifier) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.small, modifier = modifier) {
+        Column(Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(valor.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(rotulo, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

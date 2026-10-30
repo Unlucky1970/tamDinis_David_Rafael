@@ -4,10 +4,11 @@ import com.google.gson.annotations.SerializedName
 
 // Respostas e pedidos da API (ver api/index.py)
 
+// So o admin tem email (e conta na app); docentes e funcionarios sao so o nome do cartao
 data class Utilizador(
     val id: Long,
     val nome: String,
-    val email: String,
+    val email: String?,
     val perfil: String,
 ) {
     val admin: Boolean get() = perfil == "admin"
@@ -17,18 +18,26 @@ data class PedidoLogin(val email: String, val password: String)
 
 data class RespostaLogin(val token: String, val utilizador: Utilizador)
 
-// perfil: admin (docente administrador) | funcionario | docente
+// perfil: admin (docente administrador) | funcionario | docente; email e password so para o admin
 data class NovoUtilizador(
     val nome: String,
-    val email: String,
-    val password: String,
     val perfil: String,
+    val email: String? = null,
+    val password: String? = null,
 )
 
-// Campos a null nao sao enviados (o Gson omite-os)
+// Campos a null nao sao enviados (o Gson omite-os). Passar a admin exige email e password.
 data class AlteracaoUtilizador(
     val nome: String? = null,
     val perfil: String? = null,
+    val email: String? = null,
+    val password: String? = null,
+)
+
+// POST /api/cards: cartao adicionado a mao, ja associado a uma pessoa
+data class NovoCartao(
+    val uid: String,
+    @SerializedName("utilizador_id") val utilizadorId: Long,
 )
 
 // GET /api/status (so as portas ativas)
@@ -100,6 +109,7 @@ data class UltimoAcesso(
     val resultado: String,
     val origem: String,
     val utilizador: String?,
+    val motivo: String?,
 )
 
 data class PedidoAbertura(@SerializedName("dispositivo_id") val dispositivoId: Long?)
@@ -142,6 +152,7 @@ data class Cartao(
     val estado: String,
     @SerializedName("utilizador_id") val utilizadorId: Long?,
     val utilizador: String?,
+    @SerializedName("utilizador_perfil") val utilizadorPerfil: String?,
     @SerializedName("criado_em") val criadoEm: String,
     val permissoes: List<Permissao>,
 )

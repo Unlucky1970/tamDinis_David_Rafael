@@ -33,7 +33,7 @@ class SessaoStore(private val context: Context) {
             p[TOKEN] = sessao.token
             p[ID] = sessao.utilizador.id
             p[NOME] = sessao.utilizador.nome
-            p[EMAIL] = sessao.utilizador.email
+            p[EMAIL] = sessao.utilizador.email.orEmpty()
             p[PERFIL] = sessao.utilizador.perfil
         }
     }

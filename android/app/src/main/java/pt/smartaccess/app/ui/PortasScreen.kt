@@ -11,9 +11,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -27,7 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pt.smartaccess.app.data.DispositivoGestao
@@ -46,7 +48,10 @@ fun PortasScreen(snackbar: SnackbarHostState, viewModel: PortasViewModel) {
 
     ConteudoCarregado(estado, viewModel::recarregar) { portas ->
         if (portas.isEmpty()) {
-            MensagemVazia("Ainda nao ha portas.\nLigue um Arduino: ele regista-se sozinho e aparece aqui para aprovar.")
+            EstadoVazio(
+                Icons.Default.Home, "Ainda nao ha portas",
+                "Ligue um Arduino: ele regista-se sozinho e aparece aqui para aprovar.",
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -123,59 +128,48 @@ private fun CartaoPorta(
     aoRevogar: () -> Unit,
     aoReativar: () -> Unit,
 ) {
-    val verde = Color(0xFF2E7D32)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = if (porta.estado == "pendente") {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-        } else {
-            CardDefaults.cardColors()
-        },
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(porta.nome, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when (porta.estado) {
-                        "pendente" -> "Por aprovar"
-                        "revogado" -> "Revogada"
-                        else -> if (porta.online) "Online" else "Offline"
-                    },
-                    color = when {
-                        porta.estado == "revogado" -> MaterialTheme.colorScheme.error
-                        porta.estado == "pendente" -> MaterialTheme.colorScheme.tertiary
-                        porta.online -> verde
-                        else -> MaterialTheme.colorScheme.error
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                )
+    val c = MaterialTheme.colorScheme
+    CartaoLista(destaque = if (porta.estado == "pendente") c.tertiaryContainer.copy(alpha = 0.45f) else null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(porta.nome, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                porta.mac?.let {
+                    Text("MAC $it", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.onSurfaceVariant)
+                }
             }
-            porta.mac?.let { Text("MAC $it", style = MaterialTheme.typography.bodySmall) }
-            Text(
-                porta.ultimoContacto?.let { "Ultimo contacto: ${formatarData(it)}" } ?: "Ainda sem contacto",
+            when (porta.estado) {
+                "pendente" -> Etiqueta("Por aprovar", c.tertiaryContainer, c.onTertiaryContainer)
+                "revogado" -> Etiqueta("Revogada", c.errorContainer, c.onErrorContainer)
+                else -> Indicador(if (porta.online) "Online" else "Offline", if (porta.online) Verde else c.error)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            porta.ultimoContacto?.let { "Ultimo contacto: ${formatarData(it)}" } ?: "Ainda sem contacto",
+            style = MaterialTheme.typography.bodySmall,
+            color = c.onSurfaceVariant,
+        )
+        when (porta.estado) {
+            "ativo" -> Text(
+                "${if (porta.portaAberta) "Aula a decorrer" else "Trancada"} - ${porta.pessoasDentro} pessoa(s) dentro",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.onSurfaceVariant,
+            )
+            "pendente" -> Text(
+                "Arduino novo. Aprove-o e de-lhe o nome da sala para comecar a funcionar.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (porta.estado == "ativo") {
-                Text(
-                    "${if (porta.portaAberta) "Aula a decorrer" else "Fechada"} - ${porta.pessoasDentro} pessoa(s) dentro",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+        }
 
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (porta.estado) {
-                    "pendente" -> OutlinedButton(onClick = aoAprovar) { Text("Aprovar") }
-                    "ativo" -> {
-                        OutlinedButton(onClick = aoRenomear) { Text("Mudar nome") }
-                        OutlinedButton(onClick = aoRevogar) { Text("Revogar") }
-                    }
-                    "revogado" -> OutlinedButton(onClick = aoReativar) { Text("Reativar") }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (porta.estado) {
+                "pendente" -> Button(onClick = aoAprovar) { Text("Aprovar porta") }
+                "ativo" -> {
+                    OutlinedButton(onClick = aoRenomear) { Text("Mudar nome") }
+                    TextButton(onClick = aoRevogar) { Text("Revogar") }
                 }
+                "revogado" -> OutlinedButton(onClick = aoReativar) { Text("Reativar") }
             }
         }
     }

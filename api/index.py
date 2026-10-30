@@ -218,6 +218,9 @@ def utilizador_atual():
     ).fetchone()
     if not utilizador:
         raise ErroApi(401, "Utilizador ja nao existe")
+    # Um admin que entretanto passou a docente/funcionario perde o acesso (o token ainda era valido)
+    if utilizador["perfil"] != "admin":
+        raise ErroApi(401, "Sem acesso a app: so os administradores tem conta")
     return utilizador
 
 
@@ -303,11 +306,15 @@ def resumo_aula(aula) -> dict:
 
 
 def abrir_aula(con, dispositivo_id: int, utilizador_id, cartao_uid, registo_id):
-    con.execute(
-        """INSERT INTO aulas (dispositivo_id, aberta_por, cartao_uid, registo_abertura_id)
-           VALUES (%s, %s, %s, %s)""",
-        (dispositivo_id, utilizador_id, cartao_uid, registo_id),
-    )
+    try:
+        con.execute(
+            """INSERT INTO aulas (dispositivo_id, aberta_por, cartao_uid, registo_abertura_id)
+               VALUES (%s, %s, %s, %s)""",
+            (dispositivo_id, utilizador_id, cartao_uid, registo_id),
+        )
+    except psycopg.errors.UniqueViolation:
+        # Dois pedidos ao mesmo tempo na mesma porta: o outro ja abriu a aula
+        raise ErroApi(409, "Ja ha uma aula a decorrer nesta porta")
     con.execute("UPDATE dispositivos SET porta_aberta = TRUE WHERE id = %s", (dispositivo_id,))
     return aula_aberta(con, dispositivo_id)
 
@@ -365,7 +372,7 @@ def verificar_offline(con):
 
 def obter_cartao(con, cartao_id: int):
     cartao = con.execute(
-        """SELECT c.id, c.uid, c.estado, c.utilizador_id, u.nome AS utilizador, c.criado_em,
+        """SELECT c.id, c.uid, c.estado, c.utilizador_id, u.nome AS utilizador, u.perfil AS utilizador_perfil, c.criado_em,
                   coalesce((SELECT json_agg(json_build_object(
                                 'dia_semana', p.dia_semana,
                                 'hora_inicio', to_char(p.hora_inicio, 'HH24:MI'),
@@ -400,8 +407,12 @@ def login():
         "SELECT id, nome, email, perfil, password_hash FROM utilizadores WHERE lower(email) = lower(%s)",
         (email,),
     ).fetchone()
-    if not utilizador or not bcrypt.checkpw(password.encode(), utilizador.pop("password_hash").encode()):
+    password_hash = utilizador.pop("password_hash") if utilizador else None
+    if not password_hash or not bcrypt.checkpw(password.encode(), password_hash.encode()):
         raise ErroApi(401, "Email ou palavra-passe incorretos")
+    # So o administrador tem conta na app (docentes e funcionarios sao so o nome do cartao)
+    if utilizador["perfil"] != "admin":
+        raise ErroApi(403, "So os administradores podem entrar na app")
 
     token = jwt.encode(
         {
@@ -449,11 +460,12 @@ def registar_dispositivo():
         "UPDATE aulas SET fim = now(), motivo_fim = 'sistema' WHERE dispositivo_id = %s AND fim IS NULL",
         (dispositivo["id"],),
     )
-    criar_alerta(
-        con, "dispositivo_novo", dispositivo["id"],
-        f"{dispositivo['nome']} ({mac}) registou-se e aguarda aprovacao",
-    )
-    return {"api_key": chave, "nome": dispositivo["nome"], "estado": "pendente"}, 201
+    if dispositivo["estado"] == "pendente":
+        criar_alerta(
+            con, "dispositivo_novo", dispositivo["id"],
+            f"{dispositivo['nome']} ({mac}) registou-se e aguarda aprovacao",
+        )
+    return {"api_key": chave, "nome": dispositivo["nome"], "estado": dispositivo["estado"]}, 201
 
 
 # Configuracao do Arduino, pedida no arranque: nome da porta, cartoes que funcionam sem rede,
@@ -663,7 +675,7 @@ def estado_sistema():
         """SELECT d.id, d.nome, d.porta_aberta, d.pessoas_dentro, d.ultimo_contacto,
                   coalesce(d.ultimo_contacto > now() - %s, false) AS online,
                   (SELECT row_to_json(x) FROM (
-                     SELECT r.data_hora, r.resultado, r.origem, u.nome AS utilizador
+                     SELECT r.data_hora, r.resultado, r.origem, r.motivo, u.nome AS utilizador
                      FROM registos_acesso r LEFT JOIN utilizadores u ON u.id = r.utilizador_id
                      WHERE r.dispositivo_id = d.id
                      ORDER BY r.data_hora DESC LIMIT 1) x) AS ultimo_acesso,
@@ -767,6 +779,34 @@ def listar_cartoes():
     return [obter_cartao(con, linha["id"]) for linha in ids]
 
 
+# Adicionar um cartao a mao pelo UID e associa-lo logo a uma pessoa: {"uid": "8DF36E69", "utilizador_id": 2}.
+# Se o cartao ja foi lido numa porta e esta pendente, fica aprovado para essa pessoa.
+@app.post("/api/cards")
+def criar_cartao():
+    exigir_admin()
+    dados = corpo_json()
+    uid = ler_uid(dados.get("uid"))
+    utilizador_id = ler_inteiro(dados.get("utilizador_id"), "utilizador_id")
+    con = bd()
+    if not con.execute("SELECT 1 FROM utilizadores WHERE id = %s", (utilizador_id,)).fetchone():
+        raise ErroApi(404, "Utilizador nao encontrado")
+
+    existente = con.execute("SELECT id, estado FROM cartoes WHERE uid = %s", (uid,)).fetchone()
+    if existente and existente["estado"] != "pendente":
+        raise ErroApi(409, f"O cartao {uid} ja existe ({existente['estado']})")
+    if existente:
+        con.execute(
+            "UPDATE cartoes SET estado = 'ativo', utilizador_id = %s WHERE id = %s", (utilizador_id, existente["id"])
+        )
+        cartao_id = existente["id"]
+    else:
+        cartao_id = con.execute(
+            "INSERT INTO cartoes (uid, utilizador_id, estado) VALUES (%s, %s, 'ativo') RETURNING id",
+            (uid, utilizador_id),
+        ).fetchone()["id"]
+    return obter_cartao(con, cartao_id), 201
+
+
 # Aprovar ({"estado": "ativo", "utilizador_id": 2}), revogar ({"estado": "revogado"}) ou reassociar
 @app.patch("/api/cards/<int:cartao_id>")
 def alterar_cartao(cartao_id: int):
@@ -855,20 +895,27 @@ def listar_utilizadores():
     return bd().execute("SELECT id, nome, email, perfil FROM utilizadores ORDER BY nome").fetchall()
 
 
+# So o admin precisa de email e palavra-passe; docentes e funcionarios sao so o nome
+def ler_conta(dados) -> tuple:
+    email = str(dados.get("email") or "").strip()
+    password = str(dados.get("password") or "")
+    if "@" not in email:
+        raise ErroApi(422, "Um administrador precisa de 'email' (e o login na app)")
+    if len(password) < 6:
+        raise ErroApi(422, "A palavra-passe tem de ter pelo menos 6 caracteres")
+    return email, bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+# {"nome", "perfil"} para docentes e funcionarios; {"nome", "perfil": "admin", "email", "password"} para admins
 @app.post("/api/users")
 def criar_utilizador():
     exigir_admin()
     dados = corpo_json()
     nome = str(dados.get("nome", "")).strip()
-    email = str(dados.get("email", "")).strip()
-    password = str(dados.get("password", ""))
     perfil = ler_opcao(dados.get("perfil", "docente"), "perfil", PERFIS)
-    if not nome or "@" not in email:
-        raise ErroApi(422, "'nome' e 'email' sao obrigatorios")
-    if len(password) < 6:
-        raise ErroApi(422, "A palavra-passe tem de ter pelo menos 6 caracteres")
-
-    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    if not nome:
+        raise ErroApi(422, "'nome' e obrigatorio")
+    email, password_hash = ler_conta(dados) if perfil == "admin" else (None, None)
     try:
         novo = bd().execute(
             """INSERT INTO utilizadores (nome, email, password_hash, perfil)
@@ -880,21 +927,37 @@ def criar_utilizador():
     return novo, 201
 
 
-# Mudar o perfil ou o nome de um utilizador
+# Mudar o nome ou o perfil. Passar a admin exige "email" e "password" (se ainda nao tiver conta);
+# deixar de ser admin apaga a conta (fica so o nome do cartao).
 @app.patch("/api/users/<int:utilizador_id>")
 def alterar_utilizador(utilizador_id: int):
-    exigir_admin()
+    eu = exigir_admin()
     dados = corpo_json()
     con = bd()
-    atual = con.execute("SELECT nome, perfil FROM utilizadores WHERE id = %s", (utilizador_id,)).fetchone()
+    atual = con.execute(
+        "SELECT nome, perfil, email, password_hash FROM utilizadores WHERE id = %s", (utilizador_id,)
+    ).fetchone()
     if not atual:
         raise ErroApi(404, "Utilizador nao encontrado")
     perfil = ler_opcao(dados["perfil"], "perfil", PERFIS) if dados.get("perfil") is not None else atual["perfil"]
+    # Nunca deixar o sistema sem administradores
+    if perfil != atual["perfil"] and utilizador_id == eu["id"]:
+        raise ErroApi(400, "Nao pode mudar o seu proprio perfil")
     nome = str(dados.get("nome") or atual["nome"]).strip()
-    return con.execute(
-        "UPDATE utilizadores SET nome = %s, perfil = %s WHERE id = %s RETURNING id, nome, email, perfil",
-        (nome, perfil, utilizador_id),
-    ).fetchone()
+
+    email, password_hash = atual["email"], atual["password_hash"]
+    if perfil == "admin" and (dados.get("email") or dados.get("password") or not password_hash):
+        email, password_hash = ler_conta(dados)
+    elif perfil != "admin":
+        email, password_hash = None, None
+    try:
+        return con.execute(
+            """UPDATE utilizadores SET nome = %s, perfil = %s, email = %s, password_hash = %s WHERE id = %s
+               RETURNING id, nome, email, perfil""",
+            (nome, perfil, email, password_hash, utilizador_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        raise ErroApi(409, "Ja existe um utilizador com esse email")
 
 
 # ======================================================
@@ -923,6 +986,11 @@ def alterar_dispositivo(dispositivo_id: int):
         raise ErroApi(404, "Dispositivo nao encontrado")
     estado = ler_opcao(dados["estado"], "estado", ("ativo", "revogado")) if dados.get("estado") else atual["estado"]
     nome = str(dados.get("nome") or atual["nome"]).strip()[:16]   # o LCD so tem 16 colunas
+    if estado == "revogado":
+        # A porta deixa de comunicar: a aula que estivesse aberta tem de ser fechada aqui
+        aula = aula_aberta(con, dispositivo_id)
+        if aula:
+            fechar_aula(con, aula, None, "sistema")
     try:
         return con.execute(
             """UPDATE dispositivos SET nome = %s, estado = %s WHERE id = %s
