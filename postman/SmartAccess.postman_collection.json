@@ -1,16 +1,19 @@
 {
   "info": {
     "name": "SmartAccess API",
-    "description": "Testes da API SmartAccess (Flask no Vercel).\n\n1. Corre primeiro **App > Login admin**: o token fica guardado na variavel `token` e e usado em todos os pedidos da pasta App.\n2. Os pedidos da pasta **Arduino** usam a chave do dispositivo (`apiKey`), tal como o Arduino.\n3. Os ids (`comandoId`, `cartaoId`, `alertaId`) sao guardados automaticamente pelos pedidos que os devolvem; podes muda-los em *Variables*.",
+    "description": "Testes da API SmartAccess (Flask no Vercel).\n\nOrdem sugerida:\n1. **App > Login admin**: o token fica guardado em `token` e e usado na pasta App.\n2. **Arduino > Registar dispositivo de teste**: simula um Arduino novo; a chave fica guardada em `apiKey`.\n3. **App > Dispositivos > Dispositivos** e depois **Aprovar dispositivo**.\n4. A partir dai a pasta **Arduino** funciona como um Arduino real.\n\nOs ids (`dispositivoId`, `comandoId`, `cartaoId`, `alertaId`, `utilizadorId`) sao guardados pelos pedidos que os devolvem; podes muda-los em *Variables*.\n\nPerfis: admin (docente administrador), funcionario, docente.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "https://smartaccessrc522.vercel.app" },
-    { "key": "apiKey", "value": "93e864279f57017c5f279a0d552cdbfed0b9bd341bdd80d2ad5070be75193ee4" },
+    { "key": "macTeste", "value": "AA:BB:CC:00:00:01" },
+    { "key": "apiKey", "value": "" },
     { "key": "token", "value": "" },
+    { "key": "dispositivoId", "value": "1" },
     { "key": "comandoId", "value": "1" },
     { "key": "cartaoId", "value": "1" },
-    { "key": "alertaId", "value": "1" }
+    { "key": "alertaId", "value": "1" },
+    { "key": "utilizadorId", "value": "1" }
   ],
   "auth": {
     "type": "bearer",
@@ -22,17 +25,13 @@
       "item": [
         {
           "name": "Estado do servico",
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "GET",
-            "url": "{{baseUrl}}/api"
-          }
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/api" }
         }
       ]
     },
     {
       "name": "Arduino",
-      "description": "Pedidos que o Arduino faz. Autenticacao pelo cabecalho x-api-key.",
+      "description": "Pedidos que o Arduino faz. Autenticacao pelo cabecalho x-api-key (a chave vem do registo).",
       "auth": {
         "type": "apikey",
         "apikey": [
@@ -43,7 +42,26 @@
       },
       "item": [
         {
-          "name": "Acesso - cartao admin (concedido)",
+          "name": "Registar dispositivo de teste (pelo MAC)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "if (pm.response.code === 201) {",
+            "  pm.collectionVariables.set('apiKey', pm.response.json().api_key);",
+            "}"
+          ] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"mac\":\"{{macTeste}}\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/register"
+          }
+        },
+        {
+          "name": "Configuracao do dispositivo",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/device/config" }
+        },
+        {
+          "name": "Cartao admin (abre / fecha qualquer aula)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -52,7 +70,7 @@
           }
         },
         {
-          "name": "Acesso - cartao utilizador (so seg-sex 08-20)",
+          "name": "Cartao docente (so dentro do horario, so fecha a sua aula)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -61,7 +79,7 @@
           }
         },
         {
-          "name": "Acesso - cartao desconhecido (negado, fica pendente)",
+          "name": "Cartao desconhecido (negado, fica pendente)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -71,10 +89,7 @@
         },
         {
           "name": "Comandos pendentes (heartbeat)",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/api/device/commands"
-          }
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/device/commands" }
         },
         {
           "name": "Evento - passagem entrada",
@@ -95,16 +110,16 @@
           }
         },
         {
-          "name": "Evento - porta aberta",
+          "name": "Evento - sala aberta sem rede (cartao offline)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"tipo\":\"porta\",\"aberta\":true}", "options": { "raw": { "language": "json" } } },
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"porta\",\"aberta\":true,\"uid\":\"8DF36E69\"}", "options": { "raw": { "language": "json" } } },
             "url": "{{baseUrl}}/api/device/events"
           }
         },
         {
-          "name": "Evento - porta fechada",
+          "name": "Evento - sala fechada sem rede",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -134,206 +149,259 @@
     },
     {
       "name": "App",
-      "description": "Pedidos da app Android. Autenticacao por Bearer token (corre primeiro o Login).",
+      "description": "Pedidos da app Android. Autenticacao por Bearer token (corre primeiro um Login).",
       "item": [
         {
-          "name": "Login admin",
-          "event": [
+          "name": "Login",
+          "item": [
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.collectionVariables.set('token', pm.response.json().token);",
-                  "}"
-                ]
+              "name": "Login admin",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
+              ] } }],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"email\":\"admin@smartaccess.pt\",\"password\":\"admin123\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/auth/login"
               }
-            }
-          ],
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"email\":\"admin@smartaccess.pt\",\"password\":\"admin123\"}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/auth/login"
-          }
-        },
-        {
-          "name": "Login utilizador",
-          "event": [
+            },
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  pm.collectionVariables.set('token', pm.response.json().token);",
-                  "}"
-                ]
+              "name": "Login funcionario",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
+              ] } }],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"email\":\"funcionario@smartaccess.pt\",\"password\":\"func123\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/auth/login"
               }
-            }
-          ],
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"email\":\"user@smartaccess.pt\",\"password\":\"user123\"}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/auth/login"
-          }
-        },
-        {
-          "name": "Eu (utilizador autenticado)",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/me" }
-        },
-        {
-          "name": "Estado dos dispositivos",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/status" }
-        },
-        {
-          "name": "Abrir porta (remoto)",
-          "event": [
+            },
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 202) {",
-                  "  pm.collectionVariables.set('comandoId', pm.response.json().comando_id);",
-                  "}"
-                ]
+              "name": "Login docente",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
+              ] } }],
+              "request": {
+                "auth": { "type": "noauth" },
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"email\":\"docente@smartaccess.pt\",\"password\":\"doc123\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/auth/login"
               }
+            },
+            {
+              "name": "Eu (utilizador autenticado)",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/me" }
             }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/door/unlock"
-          }
+          ]
         },
         {
-          "name": "Estado do comando",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/door/commands/{{comandoId}}" }
-        },
-        {
-          "name": "Registos (todos)",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/logs?limite=50" }
-        },
-        {
-          "name": "Registos (filtrados)",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/logs?desde=2026-10-01&ate=2026-12-31&resultado=negado&limite=100",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "logs"],
-              "query": [
-                { "key": "desde", "value": "2026-10-01" },
-                { "key": "ate", "value": "2026-12-31" },
-                { "key": "resultado", "value": "negado" },
-                { "key": "utilizador_id", "value": "1", "disabled": true },
-                { "key": "limite", "value": "100" }
-              ]
+          "name": "Dispositivos",
+          "item": [
+            {
+              "name": "Dispositivos (pendentes primeiro)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "const lista = pm.response.json();",
+                "if (Array.isArray(lista) && lista.length > 0) pm.collectionVariables.set('dispositivoId', lista[0].id);"
+              ] } }],
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/devices" }
+            },
+            {
+              "name": "Aprovar dispositivo (e dar-lhe um nome)",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"estado\":\"ativo\",\"nome\":\"Sala 1.04\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/devices/{{dispositivoId}}"
+              }
+            },
+            {
+              "name": "Revogar dispositivo",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"estado\":\"revogado\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/devices/{{dispositivoId}}"
+              }
+            },
+            {
+              "name": "Estado das portas",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/status" }
+            },
+            {
+              "name": "Abrir porta (remoto)",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 202) pm.collectionVariables.set('comandoId', pm.response.json().comando_id);"
+              ] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"dispositivo_id\":{{dispositivoId}}}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/door/unlock"
+              }
+            },
+            {
+              "name": "Estado do comando",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/door/commands/{{comandoId}}" }
             }
-          }
+          ]
+        },
+        {
+          "name": "Aulas e registos",
+          "item": [
+            {
+              "name": "Aulas",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/classes?limite=20" }
+            },
+            {
+              "name": "Registos (todos)",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/logs?limite=50" }
+            },
+            {
+              "name": "Registos (so negados)",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/logs?resultado=negado&limite=50" }
+            }
+          ]
         },
         {
           "name": "Cartoes",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards" }
-        },
-        {
-          "name": "Cartoes pendentes",
-          "event": [
+          "item": [
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const lista = pm.response.json();",
-                  "if (Array.isArray(lista) && lista.length > 0) {",
-                  "  pm.collectionVariables.set('cartaoId', lista[0].id);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards?estado=pendente" }
-        },
-        {
-          "name": "Aprovar cartao (associar ao utilizador 2)",
-          "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"estado\":\"ativo\",\"utilizador_id\":2}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
-          }
-        },
-        {
-          "name": "Revogar cartao",
-          "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"estado\":\"revogado\"}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
-          }
-        },
-        {
-          "name": "Ver permissoes do cartao",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions" }
-        },
-        {
-          "name": "Definir permissoes do cartao",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "[\n  {\"dia_semana\":1,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":2,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":3,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":4,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":5,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"}\n]",
-              "options": { "raw": { "language": "json" } }
+              "name": "Cartoes",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/cards" }
             },
-            "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
-          }
-        },
-        {
-          "name": "Alertas por resolver",
-          "event": [
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const lista = pm.response.json();",
-                  "if (Array.isArray(lista) && lista.length > 0) {",
-                  "  pm.collectionVariables.set('alertaId', lista[0].id);",
-                  "}"
-                ]
+              "name": "Cartoes pendentes",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "const lista = pm.response.json();",
+                "if (Array.isArray(lista) && lista.length > 0) pm.collectionVariables.set('cartaoId', lista[0].id);"
+              ] } }],
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/cards?estado=pendente" }
+            },
+            {
+              "name": "Aprovar cartao (associar ao utilizador)",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"estado\":\"ativo\",\"utilizador_id\":{{utilizadorId}}}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
+              }
+            },
+            {
+              "name": "Revogar cartao",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"estado\":\"revogado\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
+              }
+            },
+            {
+              "name": "Ver permissoes proprias do cartao",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions" }
+            },
+            {
+              "name": "Definir permissoes proprias (substituem o horario do perfil)",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "[\n  {\"dia_semana\":1,\"hora_inicio\":\"10:00\",\"hora_fim\":\"12:00\"},\n  {\"dia_semana\":3,\"hora_inicio\":\"14:00\",\"hora_fim\":\"18:00\"}\n]", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
+              }
+            },
+            {
+              "name": "Voltar ao horario do perfil (apagar permissoes proprias)",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "[]", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
               }
             }
-          ],
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/alerts?resolvido=false" }
+          ]
         },
         {
-          "name": "Resolver alerta",
-          "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"resolvido\":true}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/alerts/{{alertaId}}"
-          }
+          "name": "Horarios por perfil",
+          "item": [
+            {
+              "name": "Horarios (docente e funcionario)",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/schedules" }
+            },
+            {
+              "name": "Definir horario do docente",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "[\n  {\"dia_semana\":1,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":2,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":3,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":4,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":5,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"}\n]", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/schedules/docente"
+              }
+            },
+            {
+              "name": "Definir horario do funcionario",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "[\n  {\"dia_semana\":1,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"},\n  {\"dia_semana\":2,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"},\n  {\"dia_semana\":3,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"},\n  {\"dia_semana\":4,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"},\n  {\"dia_semana\":5,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"},\n  {\"dia_semana\":6,\"hora_inicio\":\"07:00\",\"hora_fim\":\"23:00\"}\n]", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/schedules/funcionario"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Alertas",
+          "item": [
+            {
+              "name": "Alertas por resolver",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "const lista = pm.response.json();",
+                "if (Array.isArray(lista) && lista.length > 0) pm.collectionVariables.set('alertaId', lista[0].id);"
+              ] } }],
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/alerts?resolvido=false" }
+            },
+            {
+              "name": "Resolver alerta",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"resolvido\":true}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/alerts/{{alertaId}}"
+              }
+            }
+          ]
         },
         {
           "name": "Utilizadores",
-          "request": { "method": "GET", "url": "{{baseUrl}}/api/users" }
-        },
-        {
-          "name": "Criar utilizador",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"nome\":\"Novo Utilizador\",\"email\":\"novo@smartaccess.pt\",\"password\":\"novo123\",\"perfil\":\"utilizador\"}", "options": { "raw": { "language": "json" } } },
-            "url": "{{baseUrl}}/api/users"
-          }
+          "item": [
+            {
+              "name": "Utilizadores",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/users" }
+            },
+            {
+              "name": "Criar funcionario",
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "if (pm.response.code === 201) pm.collectionVariables.set('utilizadorId', pm.response.json().id);"
+              ] } }],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"nome\":\"Novo Funcionario\",\"email\":\"novo.funcionario@smartaccess.pt\",\"password\":\"func123\",\"perfil\":\"funcionario\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/users"
+              }
+            },
+            {
+              "name": "Mudar perfil do utilizador",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"perfil\":\"docente\"}", "options": { "raw": { "language": "json" } } },
+                "url": "{{baseUrl}}/api/users/{{utilizadorId}}"
+              }
+            }
+          ]
         }
       ]
     }
