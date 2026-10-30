@@ -116,10 +116,13 @@ def fechar_bd(excecao):
 # ======================================================
 #  LEITURA E VALIDACAO DOS DADOS
 # ======================================================
-def corpo_json():
+# tipo: dict para objetos {"...": ...}, list para listas (horarios)
+def corpo_json(tipo=dict):
     dados = request.get_json(silent=True)
     if dados is None:
         raise ErroApi(400, "O corpo tem de ser JSON")
+    if not isinstance(dados, tipo):
+        raise ErroApi(422, "O corpo tem de ser " + ("um objeto JSON" if tipo is dict else "uma lista JSON"))
     return dados
 
 
@@ -424,6 +427,7 @@ def eu():
 # O dispositivo fica pendente ate um administrador o aprovar na app (PATCH /api/devices/{id}).
 # Se o mesmo MAC voltar a registar-se (ex.: a memoria do Arduino foi apagada), recebe uma
 # chave nova e volta a ficar pendente: a chave antiga deixa de funcionar.
+# Um dispositivo revogado continua revogado (registar-se de novo nao desfaz a revogacao).
 @app.post("/api/device/register")
 def registar_dispositivo():
     mac = str(corpo_json().get("mac", "")).strip().upper()
@@ -436,8 +440,9 @@ def registar_dispositivo():
         """INSERT INTO dispositivos (nome, mac, api_key_hash, estado)
            VALUES (%(nome)s, %(mac)s, %(hash)s, 'pendente')
            ON CONFLICT (mac) DO UPDATE
-             SET api_key_hash = EXCLUDED.api_key_hash, estado = 'pendente', porta_aberta = FALSE
-           RETURNING id, nome""",
+             SET api_key_hash = EXCLUDED.api_key_hash, porta_aberta = FALSE,
+                 estado = CASE WHEN dispositivos.estado = 'revogado' THEN 'revogado' ELSE 'pendente' END
+           RETURNING id, nome, estado""",
         {"nome": "PORTA-" + mac.replace(":", "")[-6:], "mac": mac, "hash": hash_chave(chave)},
     ).fetchone()
     con.execute(
@@ -800,7 +805,7 @@ def ver_permissoes(cartao_id: int):
 @app.put("/api/cards/<int:cartao_id>/permissions")
 def definir_permissoes(cartao_id: int):
     exigir_admin()
-    permissoes = ler_janelas(corpo_json())
+    permissoes = ler_janelas(corpo_json(list))
 
     con = bd()
     obter_cartao(con, cartao_id)
@@ -968,7 +973,7 @@ def listar_horarios():
 def definir_horario_perfil(perfil: str):
     exigir_admin()
     ler_opcao(perfil, "perfil", ("docente", "funcionario"))
-    janelas = ler_janelas(corpo_json())
+    janelas = ler_janelas(corpo_json(list))
     con = bd()
     con.execute("DELETE FROM horarios_perfil WHERE perfil = %s", (perfil,))
     for dia, inicio, fim in janelas:
