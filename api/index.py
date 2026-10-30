@@ -293,6 +293,7 @@ def obter_cartao(con, cartao_id: int):
 # ======================================================
 #  ROTAS - GERAL E AUTENTICACAO
 # ======================================================
+@app.get("/")
 @app.get("/api")
 def raiz():
     return {"servico": "SmartAccess"}
