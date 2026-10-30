@@ -1,29 +1,30 @@
--- Dados iniciais para testes. MUDAR as palavras-passe e a chave do dispositivo!
+-- Dados iniciais para testes. MUDAR as palavras-passe antes da entrega!
+-- Os dispositivos (Arduinos) nao entram aqui: registam-se sozinhos e sao aprovados na app.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- para gerar o hash bcrypt das palavras-passe
 
 INSERT INTO utilizadores (nome, email, password_hash, perfil) VALUES
-  ('Administrador',    'admin@smartaccess.pt', crypt('admin123', gen_salt('bf', 10)), 'admin'),
-  ('Utilizador Teste', 'user@smartaccess.pt',  crypt('user123',  gen_salt('bf', 10)), 'utilizador')
+  ('Administrador',    'admin@smartaccess.pt',       crypt('admin123', gen_salt('bf', 10)), 'admin'),
+  ('Funcionario Teste', 'funcionario@smartaccess.pt', crypt('func123',  gen_salt('bf', 10)), 'funcionario'),
+  ('Docente Teste',    'docente@smartaccess.pt',     crypt('doc123',   gen_salt('bf', 10)), 'docente')
 ON CONFLICT DO NOTHING;
 
--- A chave em texto tem de ser a mesma que esta em API_KEY no arduino_secrets.h
-INSERT INTO dispositivos (nome, api_key_hash) VALUES
-  ('PORTA-1', encode(sha256(convert_to('93e864279f57017c5f279a0d552cdbfed0b9bd341bdd80d2ad5070be75193ee4', 'UTF8')), 'hex'))
-ON CONFLICT DO NOTHING;
+-- Horarios por omissao de cada perfil (o admin entra sempre)
+--   docente:     segunda a sexta, 08:00-20:00
+--   funcionario: segunda a sabado, 07:00-23:00
+INSERT INTO horarios_perfil (perfil, dia_semana, hora_inicio, hora_fim)
+SELECT 'docente', dia, '08:00', '20:00' FROM generate_series(1, 5) AS dia
+WHERE NOT EXISTS (SELECT 1 FROM horarios_perfil WHERE perfil = 'docente');
 
--- Cartoes reais do grupo: o do admin entra sempre,
--- o do utilizador so de segunda a sexta, das 08:00 as 20:00
+INSERT INTO horarios_perfil (perfil, dia_semana, hora_inicio, hora_fim)
+SELECT 'funcionario', dia, '07:00', '23:00' FROM generate_series(1, 6) AS dia
+WHERE NOT EXISTS (SELECT 1 FROM horarios_perfil WHERE perfil = 'funcionario');
+
+-- Cartoes reais do grupo (sem permissoes proprias: usam o horario do perfil)
 INSERT INTO cartoes (uid, utilizador_id, estado)
 SELECT '8DF36E69', id, 'ativo' FROM utilizadores WHERE email = 'admin@smartaccess.pt'
 ON CONFLICT (uid) DO NOTHING;
 
 INSERT INTO cartoes (uid, utilizador_id, estado)
-SELECT '337A93AA', id, 'ativo' FROM utilizadores WHERE email = 'user@smartaccess.pt'
+SELECT '337A93AA', id, 'ativo' FROM utilizadores WHERE email = 'docente@smartaccess.pt'
 ON CONFLICT (uid) DO NOTHING;
-
-INSERT INTO permissoes (cartao_id, dia_semana, hora_inicio, hora_fim)
-SELECT c.id, dia, '08:00', '20:00'
-FROM cartoes c, generate_series(1, 5) AS dia
-WHERE c.uid = '337A93AA'
-  AND NOT EXISTS (SELECT 1 FROM permissoes p WHERE p.cartao_id = c.id);

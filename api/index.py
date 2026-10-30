@@ -4,14 +4,18 @@ No Vercel todas as rotas sao encaminhadas para este ficheiro (ver vercel.json).
 Localmente: flask --app api/index run --port 8000 --debug   (le o .env automaticamente)
 
 Autenticacao:
-  - Arduino: cabecalho "x-api-key" (guardada na tabela dispositivos como SHA-256)
+  - Arduino: cabecalho "x-api-key". A chave e gerada pela API no registo do dispositivo
+             (POST /api/device/register, pelo MAC) e guardada na tabela dispositivos como SHA-256.
   - App:     cabecalho "Authorization: Bearer <token>" obtido em /api/auth/login
 Erros: {"detail": "mensagem"} com o codigo HTTP correspondente.
+
+Perfis: admin (docente administrador), funcionario, docente.
 """
 
 import hashlib
 import os
 import re
+import secrets
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -28,9 +32,11 @@ FUSO = ZoneInfo(os.environ.get("FUSO_HORARIO", "Europe/Lisbon"))
 
 DURACAO_TOKEN = timedelta(hours=12)
 OFFLINE_APOS = timedelta(seconds=60)      # o Arduino contacta a API a cada ~5 s
-JANELA_ENTRADA = timedelta(seconds=20)    # tempo para entrar depois de um acesso concedido (porta aberta 8 s + passagem + rede)
 VALIDADE_COMANDO = timedelta(minutes=1)   # um pedido de abertura antigo ja nao abre a porta
 TENTATIVAS_PARA_ALERTA = 3
+
+PERFIS = ("admin", "funcionario", "docente")
+PERFIS_QUE_FECHAM_QUALQUER_AULA = ("admin", "funcionario")
 
 
 # Datas em ISO 8601 (o Flask usa por omissao o formato HTTP "Thu, 30 Oct 2026 ...")
@@ -160,6 +166,23 @@ def ler_booleano(valor, campo: str) -> bool | None:
     raise ErroApi(422, f"'{campo}' tem de ser true ou false")
 
 
+# [{"dia_semana": 1, "hora_inicio": "08:00", "hora_fim": "20:00"}, ...] -> [(1, time, time), ...]
+def ler_janelas(lista) -> list:
+    if not isinstance(lista, list):
+        raise ErroApi(422, "O corpo tem de ser uma lista de horarios")
+    janelas = []
+    for p in lista:
+        if not isinstance(p, dict):
+            raise ErroApi(422, "Cada horario tem de ser um objeto")
+        dia = ler_inteiro(p.get("dia_semana"), "dia_semana", 1, 7)
+        inicio = ler_hora(p.get("hora_inicio"), "hora_inicio")
+        fim = ler_hora(p.get("hora_fim"), "hora_fim")
+        if fim <= inicio:
+            raise ErroApi(422, "hora_fim tem de ser depois de hora_inicio")
+        janelas.append((dia, inicio, fim))
+    return janelas
+
+
 # "d5 ff df b5" -> "D5FFDFB5"
 def ler_uid(valor) -> str:
     uid = re.sub(r"\s+", "", str(valor or "")).upper()
@@ -202,7 +225,13 @@ def exigir_admin():
     return utilizador
 
 
-# Identifica o Arduino pela chave e regista o contacto (serve de heartbeat)
+def hash_chave(chave: str) -> str:
+    return hashlib.sha256(chave.encode()).hexdigest()
+
+
+# Identifica o Arduino pela chave e regista o contacto (serve de heartbeat).
+# Um dispositivo pendente ou revogado tambem fica com o contacto registado (o admin ve que esta ligado),
+# mas so um dispositivo ativo pode usar as rotas.
 def dispositivo_atual():
     chave = request.headers.get("x-api-key", "")
     if not chave:
@@ -210,25 +239,83 @@ def dispositivo_atual():
     dispositivo = bd().execute(
         """UPDATE dispositivos SET ultimo_contacto = now()
            WHERE api_key_hash = %s
-           RETURNING id, nome""",
-        (hashlib.sha256(chave.encode()).hexdigest(),),
+           RETURNING id, nome, estado""",
+        (hash_chave(chave),),
     ).fetchone()
     if not dispositivo:
         raise ErroApi(401, "Chave invalida")
+    if dispositivo["estado"] == "pendente":
+        g.con.commit()   # guarda o contacto antes do erro (o erro faz rollback)
+        raise ErroApi(403, "Dispositivo a aguardar aprovacao")
+    if dispositivo["estado"] == "revogado":
+        raise ErroApi(403, "Dispositivo revogado")
     return dispositivo
+
+
+def ler_configuracao(con, chave: str, omissao: str) -> str:
+    linha = con.execute("SELECT valor FROM configuracao WHERE chave = %s", (chave,)).fetchone()
+    return linha["valor"] if linha else omissao
 
 
 # ======================================================
 #  REGRAS DE NEGOCIO
 # ======================================================
-def dentro_do_horario(con, cartao_id: int) -> bool:
+# Usa as permissoes proprias do cartao; se nao tiver nenhuma, usa o horario do perfil
+def dentro_do_horario(con, cartao_id: int, perfil: str) -> bool:
     agora = datetime.now(FUSO)
     return con.execute(
-        """SELECT 1 FROM permissoes
-           WHERE cartao_id = %s AND dia_semana = %s
-             AND hora_inicio <= %s AND %s < hora_fim""",
-        (cartao_id, agora.isoweekday(), agora.time(), agora.time()),
+        """SELECT 1 FROM (
+             SELECT dia_semana, hora_inicio, hora_fim FROM permissoes WHERE cartao_id = %(c)s
+             UNION ALL
+             SELECT dia_semana, hora_inicio, hora_fim FROM horarios_perfil
+             WHERE perfil = %(p)s AND NOT EXISTS (SELECT 1 FROM permissoes WHERE cartao_id = %(c)s)
+           ) h
+           WHERE dia_semana = %(d)s AND hora_inicio <= %(t)s AND %(t)s < hora_fim""",
+        {"c": cartao_id, "p": perfil, "d": agora.isoweekday(), "t": agora.time()},
     ).fetchone() is not None
+
+
+def aula_aberta(con, dispositivo_id: int):
+    return con.execute(
+        """SELECT a.*, u.nome AS dono, u.perfil AS dono_perfil
+           FROM aulas a LEFT JOIN utilizadores u ON u.id = a.aberta_por
+           WHERE a.dispositivo_id = %s AND a.fim IS NULL""",
+        (dispositivo_id,),
+    ).fetchone()
+
+
+def resumo_aula(aula) -> dict:
+    fim = aula["fim"] or datetime.now(timezone.utc)
+    return {
+        "id": aula["id"],
+        "dono": aula.get("dono"),
+        "dono_perfil": aula.get("dono_perfil"),
+        "cartao_uid": aula["cartao_uid"],
+        "inicio": aula["inicio"],
+        "duracao_min": int((fim - aula["inicio"]).total_seconds() // 60),
+        "entradas": aula["entradas"],
+        "saidas": aula["saidas"],
+        "entradas_nao_detetadas": aula["entradas_nao_detetadas"],
+    }
+
+
+def abrir_aula(con, dispositivo_id: int, utilizador_id, cartao_uid, registo_id):
+    con.execute(
+        """INSERT INTO aulas (dispositivo_id, aberta_por, cartao_uid, registo_abertura_id)
+           VALUES (%s, %s, %s, %s)""",
+        (dispositivo_id, utilizador_id, cartao_uid, registo_id),
+    )
+    con.execute("UPDATE dispositivos SET porta_aberta = TRUE WHERE id = %s", (dispositivo_id,))
+    return aula_aberta(con, dispositivo_id)
+
+
+def fechar_aula(con, aula, fechada_por, motivo: str) -> dict:
+    con.execute(
+        "UPDATE aulas SET fim = now(), fechada_por = %s, motivo_fim = %s WHERE id = %s",
+        (fechada_por, motivo, aula["id"]),
+    )
+    con.execute("UPDATE dispositivos SET porta_aberta = FALSE WHERE id = %s", (aula["dispositivo_id"],))
+    return resumo_aula({**aula, "fim": datetime.now(timezone.utc)})
 
 
 def criar_alerta(con, tipo: str, dispositivo_id: int, descricao: str, unico: bool = True):
@@ -249,6 +336,7 @@ def verificar_tentativas_negadas(con, dispositivo):
     negados = con.execute(
         """SELECT count(*) AS n FROM registos_acesso
            WHERE dispositivo_id = %(d)s AND resultado = 'negado'
+             AND motivo <> 'aula_a_decorrer'   -- cartao valido, so nao pode fechar a aula de outro
              AND data_hora > now() - interval '5 minutes'
              AND data_hora > coalesce(
                (SELECT max(data_hora) FROM registos_acesso
@@ -266,7 +354,7 @@ def verificar_tentativas_negadas(con, dispositivo):
 # Nao ha tarefas agendadas no Vercel gratuito: verifica-se quando a app pede dados
 def verificar_offline(con):
     for d in con.execute(
-        "SELECT id, nome FROM dispositivos WHERE ultimo_contacto < now() - %s",
+        "SELECT id, nome FROM dispositivos WHERE estado = 'ativo' AND ultimo_contacto < now() - %s",
         (OFFLINE_APOS,),
     ).fetchall():
         criar_alerta(con, "dispositivo_offline", d["id"], f"{d['nome']} sem comunicacao com o servidor")
@@ -332,7 +420,69 @@ def eu():
 # ======================================================
 #  ROTAS - DISPOSITIVO (ARDUINO)
 # ======================================================
-# 200 -> {"acesso": "concedido", "registo_id", "nome"} | 403 -> {"acesso": "negado", "motivo"}
+# Registo automatico: o Arduino envia o seu MAC e recebe uma chave unica (so e mostrada aqui).
+# O dispositivo fica pendente ate um administrador o aprovar na app (PATCH /api/devices/{id}).
+# Se o mesmo MAC voltar a registar-se (ex.: a memoria do Arduino foi apagada), recebe uma
+# chave nova e volta a ficar pendente: a chave antiga deixa de funcionar.
+@app.post("/api/device/register")
+def registar_dispositivo():
+    mac = str(corpo_json().get("mac", "")).strip().upper()
+    if not re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", mac):
+        raise ErroApi(422, "'mac' tem de estar no formato AA:BB:CC:DD:EE:FF")
+
+    chave = secrets.token_hex(32)
+    con = bd()
+    dispositivo = con.execute(
+        """INSERT INTO dispositivos (nome, mac, api_key_hash, estado)
+           VALUES (%(nome)s, %(mac)s, %(hash)s, 'pendente')
+           ON CONFLICT (mac) DO UPDATE
+             SET api_key_hash = EXCLUDED.api_key_hash, estado = 'pendente', porta_aberta = FALSE
+           RETURNING id, nome""",
+        {"nome": "PORTA-" + mac.replace(":", "")[-6:], "mac": mac, "hash": hash_chave(chave)},
+    ).fetchone()
+    con.execute(
+        "UPDATE aulas SET fim = now(), motivo_fim = 'sistema' WHERE dispositivo_id = %s AND fim IS NULL",
+        (dispositivo["id"],),
+    )
+    criar_alerta(
+        con, "dispositivo_novo", dispositivo["id"],
+        f"{dispositivo['nome']} ({mac}) registou-se e aguarda aprovacao",
+    )
+    return {"api_key": chave, "nome": dispositivo["nome"], "estado": "pendente"}, 201
+
+
+# Configuracao do Arduino, pedida no arranque: nome da porta, cartoes que funcionam sem rede,
+# intervalo de contacto e a aula que estiver a decorrer (para retomar depois de um reinicio)
+@app.get("/api/device/config")
+def configuracao_dispositivo():
+    dispositivo = dispositivo_atual()
+    con = bd()
+    perfis_offline = [p.strip() for p in ler_configuracao(con, "perfis_offline", "admin").split(",") if p.strip()]
+    cartoes = con.execute(
+        """SELECT c.uid FROM cartoes c JOIN utilizadores u ON u.id = c.utilizador_id
+           WHERE c.estado = 'ativo' AND u.perfil = ANY(%s)
+           ORDER BY c.id LIMIT 15""",
+        (perfis_offline,),
+    ).fetchall()
+    aula = aula_aberta(con, dispositivo["id"])
+    pessoas = con.execute(
+        "SELECT pessoas_dentro FROM dispositivos WHERE id = %s", (dispositivo["id"],)
+    ).fetchone()["pessoas_dentro"]
+    return {
+        "nome": dispositivo["nome"],
+        "intervalo_comandos_s": int(ler_configuracao(con, "intervalo_comandos_s", "5")),
+        "cartoes_offline": ",".join(c["uid"] for c in cartoes),
+        "pessoas_dentro": pessoas,
+        "aula": resumo_aula(aula) if aula else None,
+    }
+
+
+# Decide o que acontece quando um cartao e passado:
+#   sala fechada  -> "abrir" (inicia a aula) se o cartao for valido e estiver dentro do horario
+#   aula aberta   -> "fechar" se for o dono da aula, um admin ou um funcionario (a qualquer hora)
+#                 -> negado "aula_a_decorrer" para os outros
+# 200 -> {"acesso": "concedido", "acao": "abrir"|"fechar", "nome", "perfil", "aula": {...}}
+# 403 -> {"acesso": "negado", "motivo", "nome", "perfil", "aula"}
 @app.post("/api/access")
 def pedir_acesso():
     dispositivo = dispositivo_atual()
@@ -345,35 +495,51 @@ def pedir_acesso():
            WHERE c.uid = %s""",
         (uid,),
     ).fetchone()
+    aula = aula_aberta(con, dispositivo["id"])
+    dono_da_aula = bool(aula and cartao and cartao["utilizador_id"] is not None
+                        and cartao["utilizador_id"] == aula["aberta_por"])
 
+    acao, motivo = None, None
     if cartao is None:
         # Cartao novo: fica pendente para o administrador aprovar na app
         con.execute("INSERT INTO cartoes (uid) VALUES (%s) ON CONFLICT (uid) DO NOTHING", (uid,))
         motivo = "cartao_desconhecido"
+    elif dono_da_aula:
+        acao = "fechar"   # o dono fecha sempre a sua aula, mesmo fora do horario
     elif cartao["estado"] == "pendente":
         motivo = "cartao_pendente"
     elif cartao["estado"] == "revogado":
         motivo = "cartao_revogado"
-    elif cartao["perfil"] != "admin" and not dentro_do_horario(con, cartao["id"]):
+    elif aula and cartao["perfil"] in PERFIS_QUE_FECHAM_QUALQUER_AULA:
+        acao = "fechar"
+    elif aula:
+        motivo = "aula_a_decorrer"
+    elif cartao["perfil"] != "admin" and not dentro_do_horario(con, cartao["id"], cartao["perfil"]):
         motivo = "fora_do_horario"
     else:
-        motivo = None
+        acao = "abrir"
 
-    concedido = motivo is None
     registo = con.execute(
         """INSERT INTO registos_acesso (dispositivo_id, cartao_uid, utilizador_id, origem, resultado, motivo)
            VALUES (%s, %s, %s, 'cartao', %s, %s) RETURNING id""",
         (
             dispositivo["id"], uid, cartao["utilizador_id"] if cartao else None,
-            "concedido" if concedido else "negado", motivo,
+            "concedido" if acao else "negado",
+            {"abrir": "inicio_aula", "fechar": "fim_aula"}.get(acao, motivo),
         ),
     ).fetchone()
 
-    if not concedido:
-        verificar_tentativas_negadas(con, dispositivo)
-        return {"acesso": "negado", "motivo": motivo}, 403
-    # perfil: o Arduino deixa um funcionario (admin) fechar uma aula aberta por outro docente
-    return {"acesso": "concedido", "registo_id": registo["id"], "nome": cartao["nome"], "perfil": cartao["perfil"]}
+    pessoa = {"nome": cartao["nome"] if cartao else None, "perfil": cartao["perfil"] if cartao else None}
+    if acao == "abrir":
+        aula = abrir_aula(con, dispositivo["id"], cartao["utilizador_id"], uid, registo["id"])
+        return {"acesso": "concedido", "acao": "abrir", **pessoa, "aula": resumo_aula(aula)}
+    if acao == "fechar":
+        motivo_fim = "dono" if dono_da_aula else cartao["perfil"]
+        resumo = fechar_aula(con, aula, cartao["utilizador_id"], motivo_fim)
+        return {"acesso": "concedido", "acao": "fechar", **pessoa, "motivo_fim": motivo_fim, "aula": resumo}
+
+    verificar_tentativas_negadas(con, dispositivo)
+    return {"acesso": "negado", "motivo": motivo, **pessoa, "aula": resumo_aula(aula) if aula else None}, 403
 
 
 # Comandos pendentes (abertura remota). Chamado a cada ~5 s, serve tambem de heartbeat.
@@ -400,6 +566,7 @@ def evento_dispositivo():
     tipo = ler_opcao(evento.get("tipo"), "tipo", ("heartbeat", "comando_executado", "passagem", "porta"))
     con = bd()
 
+    # Abertura remota executada: a aula fica em nome de quem a pediu na app
     if tipo == "comando_executado":
         comando_id = ler_inteiro(evento.get("comando_id"), "comando_id")
         comando = con.execute(
@@ -415,42 +582,24 @@ def evento_dispositivo():
                VALUES (%s, %s, 'remoto', 'concedido', 'abertura_remota') RETURNING id""",
             (dispositivo["id"], comando["criado_por"]),
         ).fetchone()
-        return {"registo_id": registo["id"]}
+        aula = aula_aberta(con, dispositivo["id"]) or abrir_aula(
+            con, dispositivo["id"], comando["criado_por"], None, registo["id"]
+        )
+        return {"registo_id": registo["id"], "aula": resumo_aula(aula)}
 
     if tipo == "passagem":
         sentido = ler_opcao(evento.get("sentido"), "sentido", ("entrada", "saida"))
-
-        # Aula a decorrer (porta aberta): todas as entradas sao autorizadas e ficam ligadas
-        # ao acesso que abriu a sala. Sala fechada: cada acesso concedido autoriza uma entrada.
-        registo_id = None
-        aula_a_decorrer = con.execute(
-            "SELECT porta_aberta FROM dispositivos WHERE id = %s", (dispositivo["id"],)
-        ).fetchone()["porta_aberta"]
-        if sentido == "entrada" and aula_a_decorrer:
-            registo = con.execute(
-                """SELECT id FROM registos_acesso
-                   WHERE dispositivo_id = %s AND resultado = 'concedido'
-                   ORDER BY data_hora DESC
-                   LIMIT 1""",
-                (dispositivo["id"],),
-            ).fetchone()
-            registo_id = registo["id"] if registo else None
-        elif sentido == "entrada":
-            registo = con.execute(
-                """SELECT r.id FROM registos_acesso r
-                   WHERE r.dispositivo_id = %s AND r.resultado = 'concedido'
-                     AND r.data_hora > now() - %s
-                     AND NOT EXISTS (SELECT 1 FROM passagens p
-                                     WHERE p.registo_acesso_id = r.id AND p.sentido = 'entrada')
-                   ORDER BY r.data_hora
-                   LIMIT 1""",
-                (dispositivo["id"], JANELA_ENTRADA),
-            ).fetchone()
-            registo_id = registo["id"] if registo else None
+        aula = aula_aberta(con, dispositivo["id"])
+        antes = con.execute(
+            "SELECT pessoas_dentro FROM dispositivos WHERE id = %s", (dispositivo["id"],)
+        ).fetchone()["pessoas_dentro"]
+        # Saida com a sala vazia: a pessoa saiu, mas a entrada dela escapou aos sensores
+        nao_detetada = sentido == "saida" and antes == 0
 
         con.execute(
-            "INSERT INTO passagens (dispositivo_id, sentido, registo_acesso_id) VALUES (%s, %s, %s)",
-            (dispositivo["id"], sentido, registo_id),
+            """INSERT INTO passagens (dispositivo_id, sentido, registo_acesso_id, aula_id)
+               VALUES (%s, %s, %s, %s)""",
+            (dispositivo["id"], sentido, aula["registo_abertura_id"] if aula else None, aula["id"] if aula else None),
         )
         pessoas = con.execute(
             """UPDATE dispositivos SET pessoas_dentro = greatest(pessoas_dentro + %s, 0)
@@ -458,19 +607,41 @@ def evento_dispositivo():
             (1 if sentido == "entrada" else -1, dispositivo["id"]),
         ).fetchone()["pessoas_dentro"]
 
-        if sentido == "entrada" and registo_id is None:
+        if aula:
+            aula = con.execute(
+                f"""UPDATE aulas SET {'entradas = entradas + 1' if sentido == 'entrada' else 'saidas = saidas + 1'},
+                       entradas_nao_detetadas = entradas_nao_detetadas + %s
+                    WHERE id = %s RETURNING *""",
+                (1 if nao_detetada else 0, aula["id"]),
+            ).fetchone()
+        elif sentido == "entrada":
+            # Entrada com a sala fechada: a porta foi forcada ou ficou mal trancada
             criar_alerta(
                 con, "entrada_sem_acesso", dispositivo["id"],
-                f"Entrada em {dispositivo['nome']} sem acesso correspondente (mais pessoas do que cartoes)",
+                f"Entrada em {dispositivo['nome']} sem aula a decorrer",
                 unico=False,
             )
-        return {"pessoas_dentro": pessoas, "autorizada": registo_id is not None or sentido == "saida"}
+        return {
+            "pessoas_dentro": pessoas,
+            "autorizada": aula is not None or sentido == "saida",
+            "entrada_nao_detetada": nao_detetada,
+            "aula": {"entradas": aula["entradas"], "saidas": aula["saidas"]} if aula else None,
+        }
 
+    # Estado da porta mudado no proprio Arduino (sem rede): abrir com um cartao offline ou fechar a sala
     if tipo == "porta":
         aberta = evento.get("aberta")
         if not isinstance(aberta, bool):
             raise ErroApi(422, "'aberta' tem de ser true ou false")
-        con.execute("UPDATE dispositivos SET porta_aberta = %s WHERE id = %s", (aberta, dispositivo["id"]))
+        aula = aula_aberta(con, dispositivo["id"])
+        if aberta and not aula:
+            uid = ler_uid(evento["uid"]) if evento.get("uid") else None
+            dono = con.execute(
+                "SELECT utilizador_id FROM cartoes WHERE uid = %s", (uid,)
+            ).fetchone() if uid else None
+            abrir_aula(con, dispositivo["id"], dono["utilizador_id"] if dono else None, uid, None)
+        elif not aberta and aula:
+            fechar_aula(con, aula, None, "offline")
 
     return {"ok": True}
 
@@ -490,8 +661,12 @@ def estado_sistema():
                      SELECT r.data_hora, r.resultado, r.origem, u.nome AS utilizador
                      FROM registos_acesso r LEFT JOIN utilizadores u ON u.id = r.utilizador_id
                      WHERE r.dispositivo_id = d.id
-                     ORDER BY r.data_hora DESC LIMIT 1) x) AS ultimo_acesso
-           FROM dispositivos d ORDER BY d.id""",
+                     ORDER BY r.data_hora DESC LIMIT 1) x) AS ultimo_acesso,
+                  (SELECT row_to_json(x) FROM (
+                     SELECT a.id, a.inicio, u.nome AS dono, u.perfil AS dono_perfil, a.entradas, a.saidas
+                     FROM aulas a LEFT JOIN utilizadores u ON u.id = a.aberta_por
+                     WHERE a.dispositivo_id = d.id AND a.fim IS NULL) x) AS aula
+           FROM dispositivos d WHERE d.estado = 'ativo' ORDER BY d.id""",
         (OFFLINE_APOS,),
     ).fetchall()
 
@@ -504,9 +679,13 @@ def abrir_porta():
 
     if dados.get("dispositivo_id") is not None:
         dispositivo_id = ler_inteiro(dados["dispositivo_id"], "dispositivo_id")
-        dispositivo = con.execute("SELECT id, nome FROM dispositivos WHERE id = %s", (dispositivo_id,)).fetchone()
+        dispositivo = con.execute(
+            "SELECT id, nome FROM dispositivos WHERE id = %s AND estado = 'ativo'", (dispositivo_id,)
+        ).fetchone()
     else:
-        dispositivo = con.execute("SELECT id, nome FROM dispositivos ORDER BY id LIMIT 1").fetchone()
+        dispositivo = con.execute(
+            "SELECT id, nome FROM dispositivos WHERE estado = 'ativo' ORDER BY id LIMIT 1"
+        ).fetchone()
     if not dispositivo:
         raise ErroApi(404, "Dispositivo nao encontrado")
 
@@ -621,20 +800,7 @@ def ver_permissoes(cartao_id: int):
 @app.put("/api/cards/<int:cartao_id>/permissions")
 def definir_permissoes(cartao_id: int):
     exigir_admin()
-    lista = corpo_json()
-    if not isinstance(lista, list):
-        raise ErroApi(422, "O corpo tem de ser uma lista de permissoes")
-
-    permissoes = []
-    for p in lista:
-        if not isinstance(p, dict):
-            raise ErroApi(422, "Cada permissao tem de ser um objeto")
-        dia = ler_inteiro(p.get("dia_semana"), "dia_semana", 1, 7)
-        inicio = ler_hora(p.get("hora_inicio"), "hora_inicio")
-        fim = ler_hora(p.get("hora_fim"), "hora_fim")
-        if fim <= inicio:
-            raise ErroApi(422, "hora_fim tem de ser depois de hora_inicio")
-        permissoes.append((dia, inicio, fim))
+    permissoes = ler_janelas(corpo_json())
 
     con = bd()
     obter_cartao(con, cartao_id)
@@ -691,7 +857,7 @@ def criar_utilizador():
     nome = str(dados.get("nome", "")).strip()
     email = str(dados.get("email", "")).strip()
     password = str(dados.get("password", ""))
-    perfil = ler_opcao(dados.get("perfil", "utilizador"), "perfil", ("admin", "utilizador"))
+    perfil = ler_opcao(dados.get("perfil", "docente"), "perfil", PERFIS)
     if not nome or "@" not in email:
         raise ErroApi(422, "'nome' e 'email' sao obrigatorios")
     if len(password) < 6:
@@ -707,6 +873,110 @@ def criar_utilizador():
     except psycopg.errors.UniqueViolation:
         raise ErroApi(409, "Ja existe um utilizador com esse email")
     return novo, 201
+
+
+# Mudar o perfil ou o nome de um utilizador
+@app.patch("/api/users/<int:utilizador_id>")
+def alterar_utilizador(utilizador_id: int):
+    exigir_admin()
+    dados = corpo_json()
+    con = bd()
+    atual = con.execute("SELECT nome, perfil FROM utilizadores WHERE id = %s", (utilizador_id,)).fetchone()
+    if not atual:
+        raise ErroApi(404, "Utilizador nao encontrado")
+    perfil = ler_opcao(dados["perfil"], "perfil", PERFIS) if dados.get("perfil") is not None else atual["perfil"]
+    nome = str(dados.get("nome") or atual["nome"]).strip()
+    return con.execute(
+        "UPDATE utilizadores SET nome = %s, perfil = %s WHERE id = %s RETURNING id, nome, email, perfil",
+        (nome, perfil, utilizador_id),
+    ).fetchone()
+
+
+# ======================================================
+#  ROTAS - APP: DISPOSITIVOS, AULAS E HORARIOS
+# ======================================================
+@app.get("/api/devices")
+def listar_dispositivos():
+    exigir_admin()
+    return bd().execute(
+        """SELECT id, nome, mac, estado, porta_aberta, pessoas_dentro, ultimo_contacto, criado_em,
+                  coalesce(ultimo_contacto > now() - %s, false) AS online
+           FROM dispositivos
+           ORDER BY (estado = 'pendente') DESC, id""",
+        (OFFLINE_APOS,),
+    ).fetchall()
+
+
+# Aprovar ({"estado": "ativo", "nome": "Sala 1.04"}), revogar ({"estado": "revogado"}) ou mudar o nome
+@app.patch("/api/devices/<int:dispositivo_id>")
+def alterar_dispositivo(dispositivo_id: int):
+    exigir_admin()
+    dados = corpo_json()
+    con = bd()
+    atual = con.execute("SELECT nome, estado FROM dispositivos WHERE id = %s", (dispositivo_id,)).fetchone()
+    if not atual:
+        raise ErroApi(404, "Dispositivo nao encontrado")
+    estado = ler_opcao(dados["estado"], "estado", ("ativo", "revogado")) if dados.get("estado") else atual["estado"]
+    nome = str(dados.get("nome") or atual["nome"]).strip()[:16]   # o LCD so tem 16 colunas
+    try:
+        return con.execute(
+            """UPDATE dispositivos SET nome = %s, estado = %s WHERE id = %s
+               RETURNING id, nome, mac, estado, ultimo_contacto""",
+            (nome, estado, dispositivo_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        raise ErroApi(409, "Ja existe um dispositivo com esse nome")
+
+
+# Historico das aulas (um docente ou funcionario so ve as suas)
+@app.get("/api/classes")
+def listar_aulas():
+    utilizador = utilizador_atual()
+    limite = ler_inteiro(request.args.get("limite", 50), "limite", 1, 500)
+    so_minhas = utilizador["perfil"] != "admin"
+    return bd().execute(
+        """SELECT a.id, d.nome AS dispositivo, u.nome AS dono, u.perfil AS dono_perfil, a.cartao_uid,
+                  a.inicio, a.fim, f.nome AS fechada_por, a.motivo_fim,
+                  a.entradas, a.saidas, a.entradas_nao_detetadas
+           FROM aulas a
+           JOIN dispositivos d ON d.id = a.dispositivo_id
+           LEFT JOIN utilizadores u ON u.id = a.aberta_por
+           LEFT JOIN utilizadores f ON f.id = a.fechada_por
+           WHERE NOT %(so_minhas)s OR a.aberta_por = %(eu)s
+           ORDER BY a.inicio DESC
+           LIMIT %(limite)s""",
+        {"so_minhas": so_minhas, "eu": utilizador["id"], "limite": limite},
+    ).fetchall()
+
+
+@app.get("/api/schedules")
+def listar_horarios():
+    exigir_admin()
+    linhas = bd().execute(
+        """SELECT perfil, dia_semana, to_char(hora_inicio, 'HH24:MI') AS hora_inicio,
+                  to_char(hora_fim, 'HH24:MI') AS hora_fim
+           FROM horarios_perfil ORDER BY perfil, dia_semana, hora_inicio"""
+    ).fetchall()
+    horarios = {"docente": [], "funcionario": []}
+    for linha in linhas:
+        horarios[linha.pop("perfil")].append(linha)
+    return horarios
+
+
+# Substitui o horario de um perfil (docente ou funcionario)
+@app.put("/api/schedules/<perfil>")
+def definir_horario_perfil(perfil: str):
+    exigir_admin()
+    ler_opcao(perfil, "perfil", ("docente", "funcionario"))
+    janelas = ler_janelas(corpo_json())
+    con = bd()
+    con.execute("DELETE FROM horarios_perfil WHERE perfil = %s", (perfil,))
+    for dia, inicio, fim in janelas:
+        con.execute(
+            "INSERT INTO horarios_perfil (perfil, dia_semana, hora_inicio, hora_fim) VALUES (%s, %s, %s, %s)",
+            (perfil, dia, inicio, fim),
+        )
+    return listar_horarios()[perfil]
 
 
 if __name__ == "__main__":
