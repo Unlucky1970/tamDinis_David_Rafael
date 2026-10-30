@@ -15,3 +15,5 @@ android/app/build/
 # Python
 __pycache__/
 .venv/
+.vercel
+.env*
