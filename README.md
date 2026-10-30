@@ -63,6 +63,8 @@ UPDATE dispositivos SET api_key_hash = encode(sha256(convert_to('NOVA-CHAVE', 'U
    - `JWT_SECRET`: texto longo e aleatório
    - `FUSO_HORARIO` (opcional, por omissão `Europe/Lisbon`)
 
+Pela linha de comandos, sempre a partir da **raiz do repositório** (não da pasta `api/`): `vercel --prod`.
+
 Para confirmar que está a funcionar: `https://<projeto>.vercel.app/api` deve devolver `{"servico":"SmartAccess"}`.
 
 ### Localmente
