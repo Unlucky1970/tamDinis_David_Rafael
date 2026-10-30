@@ -1,0 +1,341 @@
+{
+  "info": {
+    "name": "SmartAccess API",
+    "description": "Testes da API SmartAccess (Flask no Vercel).\n\n1. Corre primeiro **App > Login admin**: o token fica guardado na variavel `token` e e usado em todos os pedidos da pasta App.\n2. Os pedidos da pasta **Arduino** usam a chave do dispositivo (`apiKey`), tal como o Arduino.\n3. Os ids (`comandoId`, `cartaoId`, `alertaId`) sao guardados automaticamente pelos pedidos que os devolvem; podes muda-los em *Variables*.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://smartaccessrc522.vercel.app" },
+    { "key": "apiKey", "value": "93e864279f57017c5f279a0d552cdbfed0b9bd341bdd80d2ad5070be75193ee4" },
+    { "key": "token", "value": "" },
+    { "key": "comandoId", "value": "1" },
+    { "key": "cartaoId", "value": "1" },
+    { "key": "alertaId", "value": "1" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Geral",
+      "item": [
+        {
+          "name": "Estado do servico",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}/api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Arduino",
+      "description": "Pedidos que o Arduino faz. Autenticacao pelo cabecalho x-api-key.",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          { "key": "key", "value": "x-api-key", "type": "string" },
+          { "key": "value", "value": "{{apiKey}}", "type": "string" },
+          { "key": "in", "value": "header", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Acesso - cartao admin (concedido)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"uid\":\"8DF36E69\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/access"
+          }
+        },
+        {
+          "name": "Acesso - cartao utilizador (so seg-sex 08-20)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"uid\":\"337A93AA\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/access"
+          }
+        },
+        {
+          "name": "Acesso - cartao desconhecido (negado, fica pendente)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"uid\":\"AAAAAAAA\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/access"
+          }
+        },
+        {
+          "name": "Comandos pendentes (heartbeat)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/device/commands"
+          }
+        },
+        {
+          "name": "Evento - passagem entrada",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"passagem\",\"sentido\":\"entrada\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        },
+        {
+          "name": "Evento - passagem saida",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"passagem\",\"sentido\":\"saida\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        },
+        {
+          "name": "Evento - porta aberta",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"porta\",\"aberta\":true}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        },
+        {
+          "name": "Evento - porta fechada",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"porta\",\"aberta\":false}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        },
+        {
+          "name": "Evento - heartbeat",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"heartbeat\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        },
+        {
+          "name": "Evento - comando executado",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"tipo\":\"comando_executado\",\"comando_id\":{{comandoId}}}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/device/events"
+          }
+        }
+      ]
+    },
+    {
+      "name": "App",
+      "description": "Pedidos da app Android. Autenticacao por Bearer token (corre primeiro o Login).",
+      "item": [
+        {
+          "name": "Login admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"email\":\"admin@smartaccess.pt\",\"password\":\"admin123\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Login utilizador",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"email\":\"user@smartaccess.pt\",\"password\":\"user123\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Eu (utilizador autenticado)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/me" }
+        },
+        {
+          "name": "Estado dos dispositivos",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/status" }
+        },
+        {
+          "name": "Abrir porta (remoto)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "  pm.collectionVariables.set('comandoId', pm.response.json().comando_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/door/unlock"
+          }
+        },
+        {
+          "name": "Estado do comando",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/door/commands/{{comandoId}}" }
+        },
+        {
+          "name": "Registos (todos)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/logs?limite=50" }
+        },
+        {
+          "name": "Registos (filtrados)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/logs?desde=2026-10-01&ate=2026-12-31&resultado=negado&limite=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "logs"],
+              "query": [
+                { "key": "desde", "value": "2026-10-01" },
+                { "key": "ate", "value": "2026-12-31" },
+                { "key": "resultado", "value": "negado" },
+                { "key": "utilizador_id", "value": "1", "disabled": true },
+                { "key": "limite", "value": "100" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cartoes",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards" }
+        },
+        {
+          "name": "Cartoes pendentes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const lista = pm.response.json();",
+                  "if (Array.isArray(lista) && lista.length > 0) {",
+                  "  pm.collectionVariables.set('cartaoId', lista[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards?estado=pendente" }
+        },
+        {
+          "name": "Aprovar cartao (associar ao utilizador 2)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"estado\":\"ativo\",\"utilizador_id\":2}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
+          }
+        },
+        {
+          "name": "Revogar cartao",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"estado\":\"revogado\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/cards/{{cartaoId}}"
+          }
+        },
+        {
+          "name": "Ver permissoes do cartao",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions" }
+        },
+        {
+          "name": "Definir permissoes do cartao",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\"dia_semana\":1,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":2,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":3,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":4,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"},\n  {\"dia_semana\":5,\"hora_inicio\":\"08:00\",\"hora_fim\":\"20:00\"}\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
+          }
+        },
+        {
+          "name": "Alertas por resolver",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const lista = pm.response.json();",
+                  "if (Array.isArray(lista) && lista.length > 0) {",
+                  "  pm.collectionVariables.set('alertaId', lista[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/alerts?resolvido=false" }
+        },
+        {
+          "name": "Resolver alerta",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"resolvido\":true}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/alerts/{{alertaId}}"
+          }
+        },
+        {
+          "name": "Utilizadores",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/users" }
+        },
+        {
+          "name": "Criar utilizador",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"nome\":\"Novo Utilizador\",\"email\":\"novo@smartaccess.pt\",\"password\":\"novo123\",\"perfil\":\"utilizador\"}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/users"
+          }
+        }
+      ]
+    }
+  ]
+}

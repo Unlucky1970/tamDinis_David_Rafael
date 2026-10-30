@@ -2,3 +2,7 @@ android/
 arduino/
 db/
 *.pdf
+adc/
+postman/
+.vscode/
+.claude/
