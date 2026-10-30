@@ -5,6 +5,6 @@ INSERT INTO salas (codigo, descricao) VALUES
 ON CONFLICT (codigo) DO NOTHING;
 
 INSERT INTO professores (nome, uid_cartao) VALUES
-  ('Professor Azul',  'D5FFDFB5'),
-  ('Professor Verde', '11223344')
+  ('Professor Azul',  '8DF36E69'),
+  ('Professor Verde', '337A93AA')
 ON CONFLICT (uid_cartao) DO NOTHING;
