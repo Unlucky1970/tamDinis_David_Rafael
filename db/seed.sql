@@ -1,10 +1,29 @@
--- Dados iniciais (os mesmos cartoes que estavam fixos no Arduino)
+-- Dados iniciais para testes. MUDAR as palavras-passe e a chave do dispositivo!
 
-INSERT INTO salas (codigo, descricao) VALUES
-  ('SALA-1', 'Sala de testes')
-ON CONFLICT (codigo) DO NOTHING;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- para gerar o hash bcrypt das palavras-passe
 
-INSERT INTO professores (nome, uid_cartao) VALUES
-  ('Professor Azul',  '8DF36E69'),
-  ('Professor Verde', '337A93AA')
-ON CONFLICT (uid_cartao) DO NOTHING;
+INSERT INTO utilizadores (nome, email, password_hash, perfil) VALUES
+  ('Administrador',    'admin@smartaccess.pt', crypt('admin123', gen_salt('bf', 10)), 'admin'),
+  ('Utilizador Teste', 'user@smartaccess.pt',  crypt('user123',  gen_salt('bf', 10)), 'utilizador')
+ON CONFLICT DO NOTHING;
+
+-- A chave em texto tem de ser a mesma que esta em API_KEY no arduino_secrets.h
+INSERT INTO dispositivos (nome, api_key_hash) VALUES
+  ('PORTA-1', encode(sha256(convert_to('troca-isto-por-uma-chave-longa-e-aleatoria', 'UTF8')), 'hex'))
+ON CONFLICT DO NOTHING;
+
+-- Cartoes reais do grupo: o do admin entra sempre,
+-- o do utilizador so de segunda a sexta, das 08:00 as 20:00
+INSERT INTO cartoes (uid, utilizador_id, estado)
+SELECT '8DF36E69', id, 'ativo' FROM utilizadores WHERE email = 'admin@smartaccess.pt'
+ON CONFLICT (uid) DO NOTHING;
+
+INSERT INTO cartoes (uid, utilizador_id, estado)
+SELECT '337A93AA', id, 'ativo' FROM utilizadores WHERE email = 'user@smartaccess.pt'
+ON CONFLICT (uid) DO NOTHING;
+
+INSERT INTO permissoes (cartao_id, dia_semana, hora_inicio, hora_fim)
+SELECT c.id, dia, '08:00', '20:00'
+FROM cartoes c, generate_series(1, 5) AS dia
+WHERE c.uid = '337A93AA'
+  AND NOT EXISTS (SELECT 1 FROM permissoes p WHERE p.cartao_id = c.id);
