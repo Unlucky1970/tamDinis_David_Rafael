@@ -9,7 +9,7 @@ requirements.txt         dependências da API
 vercel.json              encaminha todas as rotas para api/index.py
 db/schema.sql            tabelas, índices e trigger de registos imutáveis
 db/seed.sql              utilizadores, dispositivo e cartões de teste
-android/                 app Android (abrir esta pasta no Android Studio)
+adc/                     app Android (abrir esta pasta no Android Studio)
 ```
 
 ## Como funciona
@@ -167,8 +167,8 @@ Se o HTTPS falhar com código negativo na Rev2, atualizar o firmware do módulo 
 
 ## 5. App Android
 
-1. Abrir a pasta `android/` no Android Studio (usa Gradle 9.6 / AGP 9.4, compatíveis com o JDK do Android Studio).
-2. Em `android/local.properties` acrescentar o endereço da API:
+1. Abrir a pasta `adc/` no Android Studio (usa Gradle 9.7 / AGP 9.4, compatíveis com o JDK do Android Studio).
+2. Em `adc/local.properties` acrescentar o endereço da API:
    ```
    api.url=https://<projeto>.vercel.app/
    ```

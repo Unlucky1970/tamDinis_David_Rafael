@@ -17,3 +17,11 @@ __pycache__/
 .venv/
 .vercel
 .env*
+
+# Android (pasta adc/)
+adc/.gradle/
+adc/.idea/
+adc/.kotlin/
+adc/local.properties
+adc/build/
+adc/app/build/

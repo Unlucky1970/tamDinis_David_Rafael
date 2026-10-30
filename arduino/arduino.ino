@@ -213,10 +213,12 @@ void tratarCartao(String uid) {
     Serial.print(">> ACESSO NEGADO: ");
     Serial.println(motivo);
     acessoNegado(textoMotivo(motivo));
-  } else if (estado < 0) {
-    // Sem rede: so o cartao mestre abre (a porta fica fechada por seguranca)
+  } else if (estado < 0 || estado >= 500) {
+    // Sem rede ou servidor em baixo: so o cartao mestre abre (a porta fica fechada por seguranca)
     online = false;
-    Serial.println(">> SEM LIGACAO A API");
+    Serial.print(">> SEM LIGACAO A API (codigo ");
+    Serial.print(estado);
+    Serial.println(")");
     if (uid == UID_OFFLINE) abrirPorta("Sem ligacao", "Cartao mestre");
     else acessoNegado("Sem ligacao");
   } else {
