@@ -1,71 +1,119 @@
 -- SmartAccess - esquema PostgreSQL
 -- Executar uma vez na base de dados (ex.: psql "$DATABASE_URL" -f db/schema.sql)
 
-CREATE TABLE IF NOT EXISTS professores (
-  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  nome        TEXT        NOT NULL,
-  email       TEXT        UNIQUE,
-  uid_cartao  TEXT        NOT NULL UNIQUE,   -- UID do cartao RFID em hexadecimal maiusculo, ex.: "D5FFDFB5"
-  ativo       BOOLEAN     NOT NULL DEFAULT TRUE,
-  criado_em   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT uid_cartao_hex CHECK (uid_cartao ~ '^[0-9A-F]{8,20}$')
+CREATE TABLE IF NOT EXISTS utilizadores (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  nome           TEXT        NOT NULL,
+  email          TEXT        NOT NULL,
+  password_hash  TEXT        NOT NULL,               -- bcrypt
+  perfil         TEXT        NOT NULL DEFAULT 'utilizador',
+  criado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT perfil_valido CHECK (perfil IN ('admin', 'utilizador'))
 );
 
-CREATE TABLE IF NOT EXISTS salas (
-  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  codigo     TEXT        NOT NULL UNIQUE,      -- identificador enviado pelo Arduino, ex.: "SALA-1"
-  descricao  TEXT,
-  criado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE UNIQUE INDEX IF NOT EXISTS utilizadores_email_idx ON utilizadores (lower(email));
+
+-- Um cartao lido pela primeira vez fica 'pendente' ate o administrador o aprovar
+CREATE TABLE IF NOT EXISTS cartoes (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  uid            TEXT        NOT NULL UNIQUE,        -- hexadecimal maiusculo, ex.: "D5FFDFB5"
+  utilizador_id  BIGINT      REFERENCES utilizadores(id),
+  estado         TEXT        NOT NULL DEFAULT 'pendente',
+  criado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uid_hex CHECK (uid ~ '^[0-9A-F]{8,20}$'),
+  CONSTRAINT estado_valido CHECK (estado IN ('pendente', 'ativo', 'revogado')),
+  CONSTRAINT ativo_tem_dono CHECK (estado <> 'ativo' OR utilizador_id IS NOT NULL)
 );
 
--- Uma sessao = uma aula (entre o cartao que abre e o fecho por cartao/automatico)
-CREATE TABLE IF NOT EXISTS sessoes (
-  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  professor_id  BIGINT      NOT NULL REFERENCES professores(id),
-  sala_id       BIGINT      NOT NULL REFERENCES salas(id),
-  inicio        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  fim           TIMESTAMPTZ,
-  motivo_fim    TEXT,
-  CONSTRAINT motivo_fim_valido CHECK (motivo_fim IN ('cartao', 'automatico', 'sistema')),
-  CONSTRAINT fim_coerente CHECK ((fim IS NULL) = (motivo_fim IS NULL))
+-- Janelas de acesso de cada cartao (dia_semana: 1 = segunda ... 7 = domingo)
+CREATE TABLE IF NOT EXISTS permissoes (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cartao_id    BIGINT   NOT NULL REFERENCES cartoes(id) ON DELETE CASCADE,
+  dia_semana   SMALLINT NOT NULL,
+  hora_inicio  TIME     NOT NULL,
+  hora_fim     TIME     NOT NULL,
+  CONSTRAINT dia_valido CHECK (dia_semana BETWEEN 1 AND 7),
+  CONSTRAINT horas_coerentes CHECK (hora_fim > hora_inicio)
 );
 
--- So pode haver uma aula aberta por sala
-CREATE UNIQUE INDEX IF NOT EXISTS sessoes_uma_aberta_por_sala
-  ON sessoes (sala_id) WHERE fim IS NULL;
+CREATE INDEX IF NOT EXISTS permissoes_cartao_idx ON permissoes (cartao_id);
 
-CREATE INDEX IF NOT EXISTS sessoes_inicio_idx ON sessoes (inicio DESC);
+-- Cada Arduino tem a sua chave de API (guarda-se so o SHA-256)
+CREATE TABLE IF NOT EXISTS dispositivos (
+  id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  nome             TEXT        NOT NULL UNIQUE,
+  api_key_hash     TEXT        NOT NULL UNIQUE,
+  ultimo_contacto  TIMESTAMPTZ,
+  porta_aberta     BOOLEAN     NOT NULL DEFAULT FALSE,
+  pessoas_dentro   INT         NOT NULL DEFAULT 0,
+  criado_em        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
--- Cada passagem detetada pelo sensor HC-SR04
+-- Registo de todas as tentativas de acesso (concedidas e negadas). Apenas insercoes.
+CREATE TABLE IF NOT EXISTS registos_acesso (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  dispositivo_id  BIGINT      NOT NULL REFERENCES dispositivos(id),
+  cartao_uid      TEXT,                               -- NULL nas aberturas remotas
+  utilizador_id   BIGINT      REFERENCES utilizadores(id),
+  origem          TEXT        NOT NULL,
+  resultado       TEXT        NOT NULL,
+  motivo          TEXT,
+  data_hora       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT origem_valida CHECK (origem IN ('cartao', 'remoto')),
+  CONSTRAINT resultado_valido CHECK (resultado IN ('concedido', 'negado'))
+);
+
+CREATE INDEX IF NOT EXISTS registos_data_idx ON registos_acesso (data_hora DESC);
+CREATE INDEX IF NOT EXISTS registos_dispositivo_idx ON registos_acesso (dispositivo_id, data_hora DESC);
+
+CREATE OR REPLACE FUNCTION impedir_alteracao_registos() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'registos_acesso so aceita insercoes';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS registos_imutaveis ON registos_acesso;
+CREATE TRIGGER registos_imutaveis
+  BEFORE UPDATE OR DELETE ON registos_acesso
+  FOR EACH ROW EXECUTE FUNCTION impedir_alteracao_registos();
+
+-- Cada passagem pela porta detetada pelos 2 sensores (A = exterior, B = interior).
+-- Uma entrada fica ligada ao acesso concedido que a autorizou (NULL se nao houver nenhum).
 CREATE TABLE IF NOT EXISTS passagens (
-  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  sessao_id     BIGINT      NOT NULL REFERENCES sessoes(id) ON DELETE CASCADE,
-  registado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  dispositivo_id     BIGINT      NOT NULL REFERENCES dispositivos(id),
+  sentido            TEXT        NOT NULL,
+  registo_acesso_id  BIGINT      REFERENCES registos_acesso(id),
+  data_hora          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT sentido_valido CHECK (sentido IN ('entrada', 'saida'))
 );
 
-CREATE INDEX IF NOT EXISTS passagens_sessao_idx ON passagens (sessao_id);
+CREATE INDEX IF NOT EXISTS passagens_registo_idx ON passagens (registo_acesso_id);
 
--- Registo de todas as tentativas de acesso (concedidas e negadas)
-CREATE TABLE IF NOT EXISTS tentativas_acesso (
-  id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  uid        TEXT        NOT NULL,
-  sala_id    BIGINT      NOT NULL REFERENCES salas(id),
-  concedido  BOOLEAN     NOT NULL,
-  data       TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS alertas (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tipo            TEXT        NOT NULL,
+  descricao       TEXT        NOT NULL,
+  dispositivo_id  BIGINT      REFERENCES dispositivos(id),
+  data_hora       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolvido       BOOLEAN     NOT NULL DEFAULT FALSE,
+  CONSTRAINT tipo_valido CHECK (tipo IN ('tentativas_negadas', 'dispositivo_offline', 'entrada_sem_acesso'))
 );
 
-CREATE INDEX IF NOT EXISTS tentativas_data_idx ON tentativas_acesso (data DESC);
+CREATE INDEX IF NOT EXISTS alertas_data_idx ON alertas (resolvido, data_hora DESC);
 
--- Vista com o resumo de cada aula
-CREATE OR REPLACE VIEW vw_sessoes AS
-SELECT s.id,
-       sa.codigo AS sala,
-       p.nome    AS professor,
-       p.uid_cartao,
-       s.inicio,
-       s.fim,
-       s.motivo_fim,
-       (SELECT count(*) FROM passagens pa WHERE pa.sessao_id = s.id)::int AS total_passagens
-FROM sessoes s
-JOIN professores p ON p.id = s.professor_id
-JOIN salas sa      ON sa.id = s.sala_id;
+-- Fila de comandos para o Arduino (abertura remota)
+CREATE TABLE IF NOT EXISTS comandos (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  dispositivo_id  BIGINT      NOT NULL REFERENCES dispositivos(id),
+  tipo            TEXT        NOT NULL DEFAULT 'abrir',
+  estado          TEXT        NOT NULL DEFAULT 'pendente',
+  criado_por      BIGINT      NOT NULL REFERENCES utilizadores(id),
+  criado_em       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  executado_em    TIMESTAMPTZ,
+  CONSTRAINT tipo_comando_valido CHECK (tipo IN ('abrir')),
+  CONSTRAINT estado_comando_valido CHECK (estado IN ('pendente', 'executado', 'expirado'))
+);
+
+CREATE INDEX IF NOT EXISTS comandos_pendentes_idx ON comandos (dispositivo_id) WHERE estado = 'pendente';

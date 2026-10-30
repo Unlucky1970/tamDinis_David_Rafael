@@ -11,3 +11,7 @@ android/local.properties
 android/build/
 android/app/build/
 *.iml
+
+# Python
+__pycache__/
+.venv/
