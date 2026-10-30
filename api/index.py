@@ -28,7 +28,7 @@ FUSO = ZoneInfo(os.environ.get("FUSO_HORARIO", "Europe/Lisbon"))
 
 DURACAO_TOKEN = timedelta(hours=12)
 OFFLINE_APOS = timedelta(seconds=60)      # o Arduino contacta a API a cada ~5 s
-JANELA_ENTRADA = timedelta(seconds=30)    # tempo para entrar depois de um acesso concedido
+JANELA_ENTRADA = timedelta(seconds=20)    # tempo para entrar depois de um acesso concedido (porta aberta 8 s + passagem + rede)
 VALIDADE_COMANDO = timedelta(minutes=1)   # um pedido de abertura antigo ja nao abre a porta
 TENTATIVAS_PARA_ALERTA = 3
 

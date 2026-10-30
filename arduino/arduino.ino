@@ -48,14 +48,15 @@ const int RFID_RST = 0;   // RST do RC522
 
 // ---------------- Configuracao ----------------
 const int LIMIAR_CM = 100;                          // limiar por omissao se a calibracao nao tiver eco
-const int MARGEM_CM = 15;                           // ocupado = mais perto do que (referencia - margem)
+const int MARGEM_CM = 30;                           // ocupado = mais perto do que (referencia - margem)
 const int LEITURAS_CONFIRMAR = 2;                   // leituras seguidas para mudar de estado (filtra ruido)
 const unsigned long TEMPO_FIM_MS = 400;             // ambos livres durante isto = a pessoa ja passou
-const unsigned long TIMEOUT_PASSAGEM_MS = 8000;     // alguem parado na porta: a passagem e descartada
-const unsigned long PORTA_ABERTA_MS = 5000;         // tempo que a tranca fica aberta
+const unsigned long TIMEOUT_PASSAGEM_MS = 5000;     // atravessar os 2 sensores demora 1-2 s; mais do que 5 s = alguem parado
+const unsigned long PORTA_ABERTA_MS = 8000;         // tempo que a tranca fica aberta (chegar a porta, abrir e passar)
 const unsigned long INTERVALO_COMANDOS_MS = 5000;   // consulta de comandos remotos (e heartbeat)
 const unsigned long MENSAGEM_MS = 2000;             // tempo das mensagens "Entrou"/"Saiu" no LCD
 const unsigned long INTERVALO_WIFI_MS = 30000;      // espera entre tentativas de religar o WiFi
+const unsigned long INTERVALO_RFID_MS = 10000;      // verificacao periodica do leitor RC522
 const int ANGULO_TRANCADO = 0;
 const int ANGULO_DESTRANCADO = 90;
 const int MAX_PENDENTES = 20;                       // passagens guardadas enquanto nao ha rede
@@ -73,6 +74,7 @@ bool portaAberta = false;
 unsigned long abertaEm = 0;
 unsigned long ultimaConsulta = 0;
 unsigned long ultimaTentativaWiFi = 0;
+unsigned long ultimaVerificacaoRfid = 0;
 int pessoasDentro = 0;
 
 // Cada HC-SR04 com o seu limiar (calibrado no arranque) e filtro de leituras
@@ -110,6 +112,7 @@ int numPendentes = 0;
 // ======================================================
 void setup() {
   Serial.begin(9600);
+  Serial.setTimeout(50);              // o readString() esperava 1 s por cada comando escrito
 
   pinMode(TRIG_A, OUTPUT);
   pinMode(ECHO_A, INPUT);
@@ -129,6 +132,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
   http.setHttpResponseTimeout(8000);
+  http.connectionKeepAlive();         // reaproveita a ligacao HTTPS: so o 1.o pedido paga o handshake TLS (~1-2 s)
 
   Serial.println("=== SmartAccess ===");
   calibrarSensores();                 // a porta tem de estar livre durante o arranque
@@ -186,9 +190,20 @@ void loop() {
     fecharPorta();
   }
 
-  // 4) Comandos remotos + heartbeat
-  if (millis() - ultimaConsulta >= INTERVALO_COMANDOS_MS) {
+  // 4) Comandos remotos + heartbeat. Nao consulta a meio de uma passagem nem com a porta aberta:
+  //    o pedido bloqueia o loop e os sensores deixariam de ser lidos
+  if (millis() - ultimaConsulta >= INTERVALO_COMANDOS_MS && primeiroSensor == 0 && !portaAberta) {
     consultarComandos();
+  }
+
+  // 5) O RC522 as vezes deixa de responder (ruido, mau contacto): se isso acontecer, reinicia-o
+  if (millis() - ultimaVerificacaoRfid >= INTERVALO_RFID_MS) {
+    ultimaVerificacaoRfid = millis();
+    byte versao = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+    if (versao == 0x00 || versao == 0xFF) {
+      Serial.println("Leitor RFID sem resposta - a reiniciar");
+      rfid.PCD_Init();
+    }
   }
 
   delay(20);
@@ -200,6 +215,7 @@ void loop() {
 void tratarCartao(String uid) {
   Serial.print("Cartao lido: ");
   Serial.println(uid);
+  tone(BUZZER, 2000, 40);             // bip curto: o cartao foi lido, pode tirar-se do leitor
   mostrar("A verificar...", uid);
 
   String resposta;
@@ -261,7 +277,10 @@ void abrirPorta(String linha1, String linha2) {
   tone(BUZZER, 1000, 200);
   mostrar(linha1, linha2);
 
-  if (!jaAberta) enviarEvento("{\"tipo\":\"porta\",\"aberta\":true}");
+  if (!jaAberta) {
+    enviarEvento("{\"tipo\":\"porta\",\"aberta\":true}");
+    abertaEm = millis();        // o tempo de porta aberta conta so depois do aviso a API
+  }
 }
 
 void fecharPorta() {
@@ -512,25 +531,33 @@ bool ligarWiFi() {
 }
 
 // Faz um GET ou POST (JSON) a API; devolve o codigo HTTP (negativo = erro de rede)
+// A ligacao fica aberta entre pedidos. Se o servidor a tiver fechado entretanto,
+// o pedido falha: fecha-se do nosso lado e tenta-se uma segunda vez com uma ligacao nova.
 int pedidoApi(bool post, const char* caminho, const String& corpo, String& resposta) {
-  resposta = "";
-  if (WiFi.status() != WL_CONNECTED && !ligarWiFi()) return -1;
+  int estado = -1;
+  for (int tentativa = 0; tentativa < 2; tentativa++) {
+    resposta = "";
+    if (WiFi.status() != WL_CONNECTED && !ligarWiFi()) return -1;
 
-  http.beginRequest();
-  if (post) http.post(caminho);
-  else http.get(caminho);
-  http.sendHeader("x-api-key", API_KEY);
-  if (post) {
-    http.sendHeader("Content-Type", "application/json");
-    http.sendHeader("Content-Length", corpo.length());
-    http.beginBody();
-    http.print(corpo);
+    http.beginRequest();
+    if (post) http.post(caminho);
+    else http.get(caminho);
+    http.sendHeader("x-api-key", API_KEY);
+    if (post) {
+      http.sendHeader("Content-Type", "application/json");
+      http.sendHeader("Content-Length", corpo.length());
+      http.beginBody();
+      http.print(corpo);
+    }
+    http.endRequest();
+
+    estado = http.responseStatusCode();
+    if (estado > 0) {
+      resposta = http.responseBody();   // ler a resposta toda deixa a ligacao pronta para o proximo pedido
+      return estado;
+    }
+    http.stop();
   }
-  http.endRequest();
-
-  int estado = http.responseStatusCode();
-  if (estado > 0) resposta = http.responseBody();
-  http.stop();
   return estado;
 }
 
