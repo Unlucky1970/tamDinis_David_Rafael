@@ -45,11 +45,7 @@ Dados de teste do `seed.sql` (**mudar antes da entrega**):
 |---|---|
 | Admin | `admin@smartaccess.pt` / `admin123`, cartão `8DF36E69` |
 | Utilizador | `user@smartaccess.pt` / `user123`, cartão `337A93AA` (seg–sex 08:00–20:00) |
-<<<<<<< Updated upstream
-| Dispositivo | `PORTA-1`, chave `troca-isto-por-uma-chave-longa-e-aleatoria` |
-=======
 | Dispositivo | `PORTA-1`, chave em `db/seed.sql` (a mesma do `API_KEY` no Arduino) |
->>>>>>> Stashed changes
 
 Para trocar a chave do Arduino:
 
@@ -67,11 +63,7 @@ UPDATE dispositivos SET api_key_hash = encode(sha256(convert_to('NOVA-CHAVE', 'U
    - `JWT_SECRET`: texto longo e aleatório
    - `FUSO_HORARIO` (opcional, por omissão `Europe/Lisbon`)
 
-<<<<<<< Updated upstream
 Para confirmar que está a funcionar: `https://<projeto>.vercel.app/api` deve devolver `{"servico":"SmartAccess"}`.
-=======
-Para confirmar que está no ar: `https://<projeto>.vercel.app/api` deve devolver `{"servico":"SmartAccess"}`.
->>>>>>> Stashed changes
 
 ### Localmente
 
@@ -83,11 +75,7 @@ copy .env.example .env          # e preencher
 flask --app api/index run --port 8000 --debug
 ```
 
-<<<<<<< Updated upstream
 A API fica em http://127.0.0.1:8000 (testar com Postman ou com os exemplos abaixo). Os erros vêm sempre como `{"detail": "mensagem"}`.
-=======
-A API fica em http://127.0.0.1:8000/api (testar os endpoints com o Postman).
->>>>>>> Stashed changes
 
 ## 3. Endpoints
 
@@ -124,11 +112,7 @@ Exemplo (PowerShell):
 
 ```powershell
 $api = "https://<projeto>.vercel.app"
-<<<<<<< Updated upstream
-$dev = @{ "x-api-key" = "troca-isto-por-uma-chave-longa-e-aleatoria" }
-=======
 $dev = @{ "x-api-key" = "<chave do dispositivo>" }
->>>>>>> Stashed changes
 Invoke-RestMethod -Method Post "$api/api/access" -Headers $dev -ContentType "application/json" -Body '{"uid":"8DF36E69"}'
 
 $login = Invoke-RestMethod -Method Post "$api/api/auth/login" -ContentType "application/json" -Body '{"email":"admin@smartaccess.pt","password":"admin123"}'

@@ -9,17 +9,10 @@ ON CONFLICT DO NOTHING;
 
 -- A chave em texto tem de ser a mesma que esta em API_KEY no arduino_secrets.h
 INSERT INTO dispositivos (nome, api_key_hash) VALUES
-<<<<<<< Updated upstream
-  ('PORTA-1', encode(sha256(convert_to('troca-isto-por-uma-chave-longa-e-aleatoria', 'UTF8')), 'hex'))
-ON CONFLICT DO NOTHING;
-
--- Cartoes reais do grupo: o do admin entra sempre,
-=======
   ('PORTA-1', encode(sha256(convert_to('93e864279f57017c5f279a0d552cdbfed0b9bd341bdd80d2ad5070be75193ee4', 'UTF8')), 'hex'))
 ON CONFLICT DO NOTHING;
 
--- O cartao do admin entra sempre,
->>>>>>> Stashed changes
+-- Cartoes reais do grupo: o do admin entra sempre,
 -- o do utilizador so de segunda a sexta, das 08:00 as 20:00
 INSERT INTO cartoes (uid, utilizador_id, estado)
 SELECT '8DF36E69', id, 'ativo' FROM utilizadores WHERE email = 'admin@smartaccess.pt'
