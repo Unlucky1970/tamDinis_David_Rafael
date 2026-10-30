@@ -3,7 +3,7 @@
 //
 // Funcionamento por aula:
 //   - sala fechada: um cartao com acesso abre a porta e inicia a aula (a porta fica aberta)
-//   - aula a decorrer: o mesmo cartao (docente) ou um funcionario (perfil admin) fecha a sala;
+//   - aula a decorrer: o mesmo cartao ou um docente administrador (perfil admin) fecha a sala;
 //     qualquer outro cartao so ve "Aula a decorrer"
 #include <SPI.h>
 #include <MFRC522.h>
@@ -56,7 +56,7 @@ const int LIMIAR_CM = 100;                          // limiar por omissao se a c
 const int MARGEM_CM = 45;                           // ocupado = mais perto do que (referencia - margem)
 const int LEITURAS_CONFIRMAR = 2;                   // leituras seguidas para mudar de estado (filtra ruido)
 const unsigned long TEMPO_FIM_MS = 400;             // ambos livres durante isto = a pessoa ja passou
-const unsigned long TIMEOUT_PASSAGEM_MS = 5000;     // atravessar os 2 sensores demora 1-2 s; mais do que 5 s = alguem parado
+const unsigned long TIMEOUT_PASSAGEM_MS = 5000;     // 5 s sem nenhum sensor mudar = alguem parado na porta
 const unsigned long INTERVALO_COMANDOS_MS = 5000;   // consulta de comandos remotos (e heartbeat)
 const unsigned long MENSAGEM_MS = 2000;             // tempo das mensagens "Entrou"/"Saiu" no LCD
 const unsigned long INTERVALO_WIFI_MS = 30000;      // espera entre tentativas de religar o WiFi
@@ -76,8 +76,11 @@ HttpClient http(wifi, API_HOST, 443);
 bool online = false;
 bool portaAberta = false;    // true = aula a decorrer
 String donoAula = "";        // UID do cartao que abriu a sala ("" = abertura remota)
+String donoNome = "";        // nome de quem abriu (para as mensagens)
+bool donoAdmin = false;      // quem abriu e docente administrador
 int entradasAula = 0;        // contagem da aula atual (docente + alunos)
 int saidasAula = 0;
+int entradasNaoDetetadas = 0;   // saidas com 0 pessoas dentro: alguem entrou sem os sensores verem
 unsigned long ultimaConsulta = 0;
 unsigned long ultimaTentativaWiFi = 0;
 unsigned long ultimaVerificacaoRfid = 0;
@@ -96,13 +99,16 @@ struct SensorPorta {
 SensorPorta sensorA = {'A', TRIG_A, ECHO_A, LIMIAR_CM, 999, false, 0};
 SensorPorta sensorB = {'B', TRIG_B, ECHO_B, LIMIAR_CM, 999, false, 0};
 
-// Sentido da passagem:
-//   ENTRADA = o primeiro sensor tapado e o A (fora) e o ultimo a ficar livre e o B (dentro)
-//   SAIDA   = o primeiro e o B e o ultimo e o A
-//   se o primeiro e o ultimo sao o mesmo sensor, a pessoa voltou para tras e nao conta
-char primeiroSensor = 0;     // 0 (sem passagem), 'A' ou 'B'
-char ultimoSensor = 0;       // ultimo sensor que deixou de ver a pessoa
-unsigned long inicioPassagem = 0;
+// Sentido da passagem: segue-se o lado onde a pessoa esta (so o A tapado = fora, so o B = dentro)
+//   de A para B = 1 ENTRADA, de B para A = 1 SAIDA
+//   entrar e voltar logo a sair (A -> B -> A) = 1 entrada + 1 saida
+//   chegar ao A e voltar para tras sem nunca ficar so no B = nao conta
+char primeiroSensor = 0;     // 0 (sem passagem em curso), 'A' ou 'B'
+char ladoAtual = 0;          // ultimo lado onde a pessoa esteve sozinha num sensor
+const int MAX_TRAVESSIAS = 8;
+char travessias[MAX_TRAVESSIAS];   // 'E' / 'S' por ordem; so se enviam no fim (o pedido a API bloqueia os sensores)
+int numTravessias = 0;
+unsigned long ultimaMudanca = 0;
 unsigned long livreDesde = 0;
 
 bool mostrarDistancias = false;   // 'D' no Monitor Serie liga/desliga
@@ -169,7 +175,8 @@ void loop() {
     String texto = Serial.readString();
     texto.trim();
     texto.toUpperCase();
-    if (texto == "E") registarPassagem("entrada");
+    if ((texto == "E" || texto == "S") && !portaAberta) Serial.println("Porta trancada: ninguem pode entrar nem sair");
+    else if (texto == "E") registarPassagem("entrada");
     else if (texto == "S") registarPassagem("saida");
     else if (texto == "D") mostrarDistancias = !mostrarDistancias;
     else if (texto.length() > 0) tratarCartao(texto);
@@ -222,8 +229,10 @@ void tratarCartao(String uid) {
 
   // O docente que abriu a sala volta a passar o cartao: fim da aula (nao precisa da API)
   if (portaAberta && uid == donoAula) {
-    Serial.println(">> FIM DA AULA (cartao do docente)");
-    fecharPorta("Fim da aula");
+    Serial.print(">> FIM DA AULA - ");
+    Serial.print(donoAdmin ? "docente administrador " : "docente ");
+    Serial.println(donoNome);
+    fecharPorta(donoAdmin ? "Fim aula (admin)" : "Fim da aula");
     return;
   }
 
@@ -233,15 +242,30 @@ void tratarCartao(String uid) {
 
   if (estado == 200) {
     String nome = lerCampoTexto(resposta, "nome");
+    bool admin = lerCampoTexto(resposta, "perfil") == "admin";
     if (!portaAberta) {
-      Serial.println(">> ACESSO CONCEDIDO - aula iniciada");
-      abrirPorta(uid, "Aula iniciada", nome);
-    } else if (lerCampoTexto(resposta, "perfil") == "admin") {
-      Serial.println(">> SALA FECHADA por um funcionario");
-      fecharPorta(nome);
+      // Docente administrador: entra a qualquer hora. Docente: so dentro do seu horario (validado na API)
+      Serial.print(">> ACESSO CONCEDIDO - aula iniciada pelo ");
+      Serial.print(admin ? "docente administrador " : "docente ");
+      Serial.println(nome);
+      abrirPorta(uid, admin ? "Aula (admin)" : "Aula iniciada", nome);
+      donoNome = nome;
+      donoAdmin = admin;
+    } else if (admin) {
+      // Um docente administrador pode fechar a aula de outro docente
+      Serial.print(">> SALA FECHADA pelo docente administrador ");
+      Serial.print(nome);
+      Serial.print(" (aula de ");
+      Serial.print(donoNome);
+      Serial.println(")");
+      fecharPorta(String("Admin: ") + nome);
     } else {
-      Serial.println("Ja existe uma aula a decorrer");
-      mostrar("Aula a decorrer", "So o docente fecha");
+      Serial.print("Aula de ");
+      Serial.print(donoNome);
+      Serial.print(" a decorrer: so esse docente ou um administrador a podem fechar (");
+      Serial.print(nome);
+      Serial.println(" nao tem permissao)");
+      mostrar("Aula a decorrer", "Sem permissao");
       delay(1500);
       mostrarRepouso();
     }
@@ -256,9 +280,15 @@ void tratarCartao(String uid) {
     Serial.print(">> SEM LIGACAO A API (codigo ");
     Serial.print(estado);
     Serial.println(")");
-    if (uid == UID_OFFLINE && !portaAberta) abrirPorta(uid, "Sem ligacao", "Cartao mestre");
-    else if (uid == UID_OFFLINE) fecharPorta("Cartao mestre");
-    else acessoNegado("Sem ligacao");
+    if (uid == UID_OFFLINE && !portaAberta) {
+      abrirPorta(uid, "Sem ligacao", "Cartao mestre");
+      donoNome = "cartao mestre";
+      donoAdmin = true;
+    } else if (uid == UID_OFFLINE) {
+      fecharPorta("Cartao mestre");
+    } else {
+      acessoNegado("Sem ligacao");
+    }
   } else {
     Serial.print("Erro na API: ");
     Serial.print(estado);
@@ -288,12 +318,13 @@ String textoMotivo(const String& motivo) {
   return motivo;
 }
 
-// Inicio da aula: destranca e a porta fica aberta ate o docente (ou um funcionario) a fechar
+// Inicio da aula: destranca e a porta fica aberta ate o docente (ou um docente administrador) a fechar
 void abrirPorta(String dono, String linha1, String linha2) {
   portaAberta = true;
   donoAula = dono;
   entradasAula = 0;
   saidasAula = 0;
+  entradasNaoDetetadas = 0;
 
   tranca.write(ANGULO_DESTRANCADO);
   digitalWrite(LED_VERMELHO, LOW);
@@ -308,6 +339,8 @@ void abrirPorta(String dono, String linha1, String linha2) {
 void fecharPorta(String linha2) {
   portaAberta = false;
   donoAula = "";
+  donoNome = "";
+  donoAdmin = false;
   tranca.write(ANGULO_TRANCADO);
   digitalWrite(LED_VERDE, LOW);
   digitalWrite(LED_VERMELHO, HIGH);
@@ -319,6 +352,10 @@ void fecharPorta(String linha2) {
   Serial.print(saidasAula);
   Serial.print(" saidas, ainda dentro: ");
   Serial.println(pessoasDentro);
+  if (entradasNaoDetetadas > 0) {
+    Serial.print("   Entradas nao detetadas pelos sensores: ");
+    Serial.println(entradasNaoDetetadas);
+  }
   mostrar("Sala fechada", linha2);
   mensagemEm = millis();
 
@@ -407,53 +444,75 @@ void verificarPassagem() {
   bool b = sensorB.ocupado;
   unsigned long agora = millis();
 
+  // Porta trancada: ninguem consegue entrar nem sair, o que os sensores virem e ruido
+  // (ex.: alguem a passar no corredor em frente ao sensor A)
+  if (!portaAberta) {
+    primeiroSensor = 0;
+    return;
+  }
+
   // 1) Inicio: so comeca quando um dos lados e tapado antes do outro
   if (primeiroSensor == 0) {
     if (a != b) {
       primeiroSensor = a ? 'A' : 'B';
-      ultimoSensor = primeiroSensor;
-      inicioPassagem = agora;
+      ladoAtual = primeiroSensor;
+      numTravessias = 0;
+      ultimaMudanca = agora;
       livreDesde = 0;
     }
     return;
   }
+  if (mudouA || mudouB) ultimaMudanca = agora;
 
-  // 2) Durante: guarda qual foi o ultimo sensor a deixar de ver a pessoa
-  if (mudouA && !a) ultimoSensor = 'A';
-  if (mudouB && !b) ultimoSensor = 'B';
+  // 2) Durante: sempre que a pessoa fica so no sensor do outro lado, atravessou a porta
+  if (a != b) {
+    char lado = a ? 'A' : 'B';
+    if (lado != ladoAtual) {
+      if (numTravessias < MAX_TRAVESSIAS) travessias[numTravessias++] = (lado == 'B') ? 'E' : 'S';
+      ladoAtual = lado;
+    }
+  }
 
-  // 3) Fim: os dois livres durante TEMPO_FIM_MS (tolera o espaco entre os sensores)
+  // 3) Fim: os dois livres durante TEMPO_FIM_MS (tolera o espaco entre os sensores).
+  //    Se ninguem se mexer durante TIMEOUT_PASSAGEM_MS (alguem parado na porta), fecha a passagem na mesma.
+  bool fim = false;
   if (a || b) {
     livreDesde = 0;
   } else if (livreDesde == 0) {
     livreDesde = agora;
   } else if (agora - livreDesde >= TEMPO_FIM_MS) {
-    if (primeiroSensor == 'A' && ultimoSensor == 'B') {
-      registarPassagem("entrada");
-    } else if (primeiroSensor == 'B' && ultimoSensor == 'A') {
-      registarPassagem("saida");
-    } else {
-      Serial.println("Passagem ignorada: a pessoa voltou para tras");
-    }
-    primeiroSensor = 0;
+    fim = true;
+  }
+  if (!fim && agora - ultimaMudanca > TIMEOUT_PASSAGEM_MS) {
+    Serial.println("Alguem parado na porta - a passagem foi fechada");
+    fim = true;
+  }
+  if (!fim) return;
+
+  primeiroSensor = 0;
+  if (numTravessias == 0) {
+    Serial.println("Passagem ignorada: a pessoa voltou para tras");
     return;
   }
-
-  // Alguem parado na porta ou objeto a tapar um sensor: descarta e recomeca
-  if (agora - inicioPassagem > TIMEOUT_PASSAGEM_MS) {
-    Serial.println("Passagem ignorada: demorou demasiado");
-    primeiroSensor = 0;
+  for (int i = 0; i < numTravessias; i++) {
+    registarPassagem(travessias[i] == 'E' ? "entrada" : "saida");
   }
 }
 
 void registarPassagem(const char* sentido) {
   bool entrada = strcmp(sentido, "entrada") == 0;
+  // Saida com a sala vazia: a pessoa sai na mesma, mas a entrada dela escapou aos sensores
+  bool semEntrada = !entrada && pessoasDentro == 0;
   if (entrada) {
     pessoasDentro++;
     entradasAula++;
   } else {
     if (pessoasDentro > 0) pessoasDentro--;
     saidasAula++;
+  }
+  if (semEntrada) {
+    entradasNaoDetetadas++;
+    Serial.println(">> ATENCAO: saida com 0 pessoas dentro - houve 1 entrada que os sensores nao detetaram");
   }
   tone(BUZZER, entrada ? 1500 : 900, 80);     // agudo = entrada, grave = saida
 
@@ -533,7 +592,10 @@ void consultarComandos() {
     Serial.print(">> ABERTURA REMOTA (comando ");
     Serial.print(comandoId);
     Serial.println(")");
-    if (!portaAberta) abrirPorta("", "Abertura remota", "");   // sem dono: fecha com cartao de funcionario
+    if (!portaAberta) {
+      abrirPorta("", "Abertura remota", "");   // sem dono: fecha com o cartao de um docente administrador
+      donoNome = "abertura remota";
+    }
     enviarEvento("{\"tipo\":\"comando_executado\",\"comando_id\":" + String(comandoId) + "}");
   }
 }
