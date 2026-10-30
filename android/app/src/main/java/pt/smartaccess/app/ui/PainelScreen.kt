@@ -45,7 +45,10 @@ fun PainelScreen(utilizador: Utilizador, snackbar: SnackbarHostState, viewModel:
 
     ConteudoCarregado(estado, viewModel::recarregar) { dispositivos ->
         if (dispositivos.isEmpty()) {
-            MensagemVazia("Nenhum dispositivo registado")
+            MensagemVazia(
+                if (utilizador.admin) "Nenhuma porta ativa.\nAprove os Arduinos novos em Gestao > Portas."
+                else "Nenhuma porta ativa"
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -148,13 +151,13 @@ private fun CartaoDispositivo(
                 Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = aoAbrir,
-                    enabled = !aAbrir && dispositivo.online,
+                    enabled = !aAbrir && dispositivo.online && !dispositivo.portaAberta,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (aAbrir) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("Abrir porta")
+                    when {
+                        aAbrir -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        dispositivo.portaAberta -> Text("Porta ja aberta")
+                        else -> Text("Abrir porta")
                     }
                 }
             }

@@ -52,7 +52,8 @@ fun AlertasScreen(snackbar: SnackbarHostState, viewModel: AlertasViewModel) {
 private fun tituloAlerta(tipo: String): String = when (tipo) {
     "tentativas_negadas" -> "Tentativas de acesso negadas"
     "dispositivo_offline" -> "Dispositivo offline"
-    "entrada_sem_acesso" -> "Entrada sem acesso"
+    "entrada_sem_acesso" -> "Entrada com a sala fechada"
+    "dispositivo_novo" -> "Porta nova por aprovar"
     else -> tipo
 }
 

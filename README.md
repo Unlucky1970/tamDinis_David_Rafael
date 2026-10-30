@@ -10,7 +10,7 @@ vercel.json              encaminha todas as rotas para api/index.py
 db/schema.sql            tabelas, índices e trigger de registos imutáveis (cria ou atualiza a base)
 db/seed.sql              utilizadores, horários e cartões de teste
 postman/                 coleção do Postman com todos os pedidos
-adc/                     app Android (abrir esta pasta no Android Studio)
+android/                 app Android (abrir esta pasta no Android Studio)
 ```
 
 ## Como funciona
@@ -188,8 +188,8 @@ Se o HTTPS falhar com código negativo na Rev2, atualizar o firmware do módulo 
 
 ## 5. App Android
 
-1. Abrir a pasta `adc/` no Android Studio (usa Gradle 9.7 / AGP 9.4, compatíveis com o JDK do Android Studio).
-2. Em `adc/local.properties` acrescentar o endereço da API:
+1. Abrir a pasta `android/` no Android Studio (usa Gradle 9.7 / AGP 9.4, compatíveis com o JDK do Android Studio).
+2. Em `android/local.properties` acrescentar o endereço da API:
    ```
    api.url=https://<projeto>.vercel.app/
    ```
@@ -197,9 +197,16 @@ Se o HTTPS falhar com código negativo na Rev2, atualizar o firmware do módulo 
    Se o emulador não chegar ao PC, usar `adb reverse tcp:8000 tcp:8000` e `api.url=http://127.0.0.1:8000/`.
 3. *Run*.
 
-Ecrãs: **Login**, **Painel** (estado da porta, online/offline, pessoas dentro, último acesso, botão "Abrir porta" com confirmação), **Registos** (filtros por período, resultado e utilizador, atualiza sozinho), **Cartões** (aprovar pendentes, revogar/reativar, horários por dia) e **Alertas** (marcar como resolvido). Docentes e funcionários só veem o Painel e os seus Registos.
+Separadores:
+
+| Separador | Quem vê | O que tem |
+|---|---|---|
+| **Painel** | todos | cada porta: online/offline, trancada/aberta, pessoas dentro, aula a decorrer (dono, desde quando, entradas/saídas), último acesso; o admin pode abrir a porta à distância |
+| **Aulas** | todos (docente e funcionário só as suas) | histórico de aulas: porta, dono, duração, entradas, saídas, entradas não detetadas, quem fechou |
+| **Registos** | todos (docente e funcionário só os seus) | acessos com filtros por período, resultado e utilizador |
+| **Gestão** | admin | **Portas** (aprovar Arduinos novos e dar-lhes nome, revogar), **Cartões** (aprovar, revogar, horário próprio), **Pessoas** (criar utilizadores, mudar perfil) e **Horários** (do docente e do funcionário) |
+| **Alertas** | admin | alertas por resolver (inclui portas novas à espera de aprovação) |
 
 ## Por fazer
 
-- App: ecrãs para **Dispositivos** (aprovar portas novas), **Aulas** e **Horários por perfil**. Por agora faz-se pelo Postman.
 - Notificações push (Firebase Cloud Messaging): é preciso criar um projeto Firebase e adicionar o `google-services.json`. Por agora a app consulta os alertas a cada 10 s enquanto está aberta.
