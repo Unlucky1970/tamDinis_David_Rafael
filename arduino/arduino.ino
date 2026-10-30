@@ -1,5 +1,10 @@
 // SmartAccess - leitor RFID RC522 + 2 sensores HC-SR04 (entrada/saida) + WiFi + API (Python no Vercel)
 // O Arduino so le os sensores e executa: a decisao de abrir a porta e tomada na API.
+//
+// Funcionamento por aula:
+//   - sala fechada: um cartao com acesso abre a porta e inicia a aula (a porta fica aberta)
+//   - aula a decorrer: o mesmo cartao (docente) ou um funcionario (perfil admin) fecha a sala;
+//     qualquer outro cartao so ve "Aula a decorrer"
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Servo.h>
@@ -16,8 +21,8 @@
 void tratarCartao(String uid);
 String lerUID();
 String textoMotivo(const String& motivo);
-void abrirPorta(String linha1, String linha2);
-void fecharPorta();
+void abrirPorta(String dono, String linha1, String linha2);
+void fecharPorta(String linha2);
 void acessoNegado(String motivo);
 long medirDistancia(int trig, int echo);
 void calibrarSensores();
@@ -48,11 +53,10 @@ const int RFID_RST = 0;   // RST do RC522
 
 // ---------------- Configuracao ----------------
 const int LIMIAR_CM = 100;                          // limiar por omissao se a calibracao nao tiver eco
-const int MARGEM_CM = 30;                           // ocupado = mais perto do que (referencia - margem)
+const int MARGEM_CM = 45;                           // ocupado = mais perto do que (referencia - margem)
 const int LEITURAS_CONFIRMAR = 2;                   // leituras seguidas para mudar de estado (filtra ruido)
 const unsigned long TEMPO_FIM_MS = 400;             // ambos livres durante isto = a pessoa ja passou
 const unsigned long TIMEOUT_PASSAGEM_MS = 5000;     // atravessar os 2 sensores demora 1-2 s; mais do que 5 s = alguem parado
-const unsigned long PORTA_ABERTA_MS = 8000;         // tempo que a tranca fica aberta (chegar a porta, abrir e passar)
 const unsigned long INTERVALO_COMANDOS_MS = 5000;   // consulta de comandos remotos (e heartbeat)
 const unsigned long MENSAGEM_MS = 2000;             // tempo das mensagens "Entrou"/"Saiu" no LCD
 const unsigned long INTERVALO_WIFI_MS = 30000;      // espera entre tentativas de religar o WiFi
@@ -70,8 +74,10 @@ WiFiSSLClient wifi;                       // o Vercel so aceita HTTPS
 HttpClient http(wifi, API_HOST, 443);
 
 bool online = false;
-bool portaAberta = false;
-unsigned long abertaEm = 0;
+bool portaAberta = false;    // true = aula a decorrer
+String donoAula = "";        // UID do cartao que abriu a sala ("" = abertura remota)
+int entradasAula = 0;        // contagem da aula atual (docente + alunos)
+int saidasAula = 0;
 unsigned long ultimaConsulta = 0;
 unsigned long ultimaTentativaWiFi = 0;
 unsigned long ultimaVerificacaoRfid = 0;
@@ -137,7 +143,9 @@ void setup() {
   Serial.println("=== SmartAccess ===");
   calibrarSensores();                 // a porta tem de estar livre durante o arranque
   ligarWiFi();
-  consultarComandos();                // primeiro contacto com a API
+  // O Arduino arranca sempre com a sala fechada: corrige o estado na API (ex.: reiniciou a meio de uma aula)
+  enviarEvento("{\"tipo\":\"porta\",\"aberta\":false}");
+  consultarComandos();
 
   mostrarRepouso();
   Serial.println("Aproxime um cartao do leitor RFID.");
@@ -182,21 +190,16 @@ void loop() {
   // Apaga a mensagem "Entrou"/"Saiu" do LCD passados 2 s
   if (mensagemEm != 0 && millis() - mensagemEm >= MENSAGEM_MS) {
     mensagemEm = 0;
-    if (!portaAberta) mostrarRepouso();
+    mostrarRepouso();
   }
 
-  // 3) Voltar a trancar ao fim de 5 s
-  if (portaAberta && millis() - abertaEm >= PORTA_ABERTA_MS) {
-    fecharPorta();
-  }
-
-  // 4) Comandos remotos + heartbeat. Nao consulta a meio de uma passagem nem com a porta aberta:
+  // 3) Comandos remotos + heartbeat. Nao consulta a meio de uma passagem:
   //    o pedido bloqueia o loop e os sensores deixariam de ser lidos
-  if (millis() - ultimaConsulta >= INTERVALO_COMANDOS_MS && primeiroSensor == 0 && !portaAberta) {
+  if (millis() - ultimaConsulta >= INTERVALO_COMANDOS_MS && primeiroSensor == 0) {
     consultarComandos();
   }
 
-  // 5) O RC522 as vezes deixa de responder (ruido, mau contacto): se isso acontecer, reinicia-o
+  // 4) O RC522 as vezes deixa de responder (ruido, mau contacto): se isso acontecer, reinicia-o
   if (millis() - ultimaVerificacaoRfid >= INTERVALO_RFID_MS) {
     ultimaVerificacaoRfid = millis();
     byte versao = rfid.PCD_ReadRegister(MFRC522::VersionReg);
@@ -216,14 +219,32 @@ void tratarCartao(String uid) {
   Serial.print("Cartao lido: ");
   Serial.println(uid);
   tone(BUZZER, 2000, 40);             // bip curto: o cartao foi lido, pode tirar-se do leitor
-  mostrar("A verificar...", uid);
 
+  // O docente que abriu a sala volta a passar o cartao: fim da aula (nao precisa da API)
+  if (portaAberta && uid == donoAula) {
+    Serial.println(">> FIM DA AULA (cartao do docente)");
+    fecharPorta("Fim da aula");
+    return;
+  }
+
+  mostrar("A verificar...", uid);
   String resposta;
   int estado = pedidoApi(true, "/api/access", "{\"uid\":\"" + uid + "\"}", resposta);
 
   if (estado == 200) {
-    Serial.println(">> ACESSO CONCEDIDO");
-    abrirPorta("Acesso concedido", lerCampoTexto(resposta, "nome"));
+    String nome = lerCampoTexto(resposta, "nome");
+    if (!portaAberta) {
+      Serial.println(">> ACESSO CONCEDIDO - aula iniciada");
+      abrirPorta(uid, "Aula iniciada", nome);
+    } else if (lerCampoTexto(resposta, "perfil") == "admin") {
+      Serial.println(">> SALA FECHADA por um funcionario");
+      fecharPorta(nome);
+    } else {
+      Serial.println("Ja existe uma aula a decorrer");
+      mostrar("Aula a decorrer", "So o docente fecha");
+      delay(1500);
+      mostrarRepouso();
+    }
   } else if (estado == 403) {
     String motivo = lerCampoTexto(resposta, "motivo");
     Serial.print(">> ACESSO NEGADO: ");
@@ -235,7 +256,8 @@ void tratarCartao(String uid) {
     Serial.print(">> SEM LIGACAO A API (codigo ");
     Serial.print(estado);
     Serial.println(")");
-    if (uid == UID_OFFLINE) abrirPorta("Sem ligacao", "Cartao mestre");
+    if (uid == UID_OFFLINE && !portaAberta) abrirPorta(uid, "Sem ligacao", "Cartao mestre");
+    else if (uid == UID_OFFLINE) fecharPorta("Cartao mestre");
     else acessoNegado("Sem ligacao");
   } else {
     Serial.print("Erro na API: ");
@@ -266,30 +288,40 @@ String textoMotivo(const String& motivo) {
   return motivo;
 }
 
-void abrirPorta(String linha1, String linha2) {
-  bool jaAberta = portaAberta;
+// Inicio da aula: destranca e a porta fica aberta ate o docente (ou um funcionario) a fechar
+void abrirPorta(String dono, String linha1, String linha2) {
   portaAberta = true;
-  abertaEm = millis();          // se ja estava aberta, prolonga
+  donoAula = dono;
+  entradasAula = 0;
+  saidasAula = 0;
 
   tranca.write(ANGULO_DESTRANCADO);
   digitalWrite(LED_VERMELHO, LOW);
   digitalWrite(LED_VERDE, HIGH);
   tone(BUZZER, 1000, 200);
   mostrar(linha1, linha2);
+  mensagemEm = millis();        // passados 2 s o LCD mostra "Aula a decorrer"
 
-  if (!jaAberta) {
-    enviarEvento("{\"tipo\":\"porta\",\"aberta\":true}");
-    abertaEm = millis();        // o tempo de porta aberta conta so depois do aviso a API
-  }
+  enviarEvento("{\"tipo\":\"porta\",\"aberta\":true}");
 }
 
-void fecharPorta() {
+void fecharPorta(String linha2) {
   portaAberta = false;
+  donoAula = "";
   tranca.write(ANGULO_TRANCADO);
   digitalWrite(LED_VERDE, LOW);
   digitalWrite(LED_VERMELHO, HIGH);
+  tone(BUZZER, 800, 300);
   Serial.println("Porta trancada");
-  mostrarRepouso();
+  Serial.print("   Resumo da aula: ");
+  Serial.print(entradasAula);
+  Serial.print(" entradas, ");
+  Serial.print(saidasAula);
+  Serial.print(" saidas, ainda dentro: ");
+  Serial.println(pessoasDentro);
+  mostrar("Sala fechada", linha2);
+  mensagemEm = millis();
+
   enviarEvento("{\"tipo\":\"porta\",\"aberta\":false}");
 }
 
@@ -416,12 +448,13 @@ void verificarPassagem() {
 
 void registarPassagem(const char* sentido) {
   bool entrada = strcmp(sentido, "entrada") == 0;
-  if (entrada) pessoasDentro++;
-  else if (pessoasDentro > 0) pessoasDentro--;
-
-  Serial.print(entrada ? ">> ENTRADA" : ">> SAIDA");
-  Serial.print(" -> dentro: ");
-  Serial.println(pessoasDentro);
+  if (entrada) {
+    pessoasDentro++;
+    entradasAula++;
+  } else {
+    if (pessoasDentro > 0) pessoasDentro--;
+    saidasAula++;
+  }
   tone(BUZZER, entrada ? 1500 : 900, 80);     // agudo = entrada, grave = saida
 
   // Mostra ja a contagem local; o LCD volta ao normal passados 2 s (ver loop)
@@ -431,6 +464,16 @@ void registarPassagem(const char* sentido) {
   if (!enviarPassagem(sentido) && numPendentes < MAX_PENDENTES) {
     pendentes[numPendentes++] = entrada ? 'E' : 'S';
   }
+
+  // Ex.: ">> ENTRADA | Pessoas dentro: 5 | Aula: 6 entradas, 1 saidas"
+  Serial.print(entrada ? ">> ENTRADA" : ">> SAIDA  ");
+  Serial.print(" | Pessoas dentro: ");
+  Serial.print(pessoasDentro);
+  Serial.print(" | Aula: ");
+  Serial.print(entradasAula);
+  Serial.print(" entradas, ");
+  Serial.print(saidasAula);
+  Serial.println(" saidas");
 }
 
 // POST /api/device/events -> {"pessoas_dentro": N, "autorizada": true|false}
@@ -480,7 +523,7 @@ void consultarComandos() {
   String resposta;
   int estado = pedidoApi(false, "/api/device/commands", "", resposta);
   online = estado == 200;
-  if (online != estavaOnline && !portaAberta) mostrarRepouso();
+  if (online != estavaOnline && mensagemEm == 0) mostrarRepouso();
   if (!online) return;
 
   if (numPendentes > 0) enviarPassagensPendentes();
@@ -490,7 +533,7 @@ void consultarComandos() {
     Serial.print(">> ABERTURA REMOTA (comando ");
     Serial.print(comandoId);
     Serial.println(")");
-    abrirPorta("Abertura remota", "");
+    if (!portaAberta) abrirPorta("", "Abertura remota", "");   // sem dono: fecha com cartao de funcionario
     enviarEvento("{\"tipo\":\"comando_executado\",\"comando_id\":" + String(comandoId) + "}");
   }
 }
@@ -526,7 +569,7 @@ bool ligarWiFi() {
   } else {
     Serial.println("WiFi indisponivel - a funcionar sem rede");
   }
-  if (!portaAberta) mostrarRepouso();
+  mostrarRepouso();
   return ligado;
 }
 
@@ -592,5 +635,5 @@ void mostrarRepouso() {
   String linha2 = "Dentro: ";
   linha2 += pessoasDentro;
   if (!online) linha2 += " OFF";
-  mostrar("Passe o cartao", linha2);
+  mostrar(portaAberta ? "Aula a decorrer" : "Passe o cartao", linha2);
 }

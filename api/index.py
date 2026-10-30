@@ -372,7 +372,8 @@ def pedir_acesso():
     if not concedido:
         verificar_tentativas_negadas(con, dispositivo)
         return {"acesso": "negado", "motivo": motivo}, 403
-    return {"acesso": "concedido", "registo_id": registo["id"], "nome": cartao["nome"]}
+    # perfil: o Arduino deixa um funcionario (admin) fechar uma aula aberta por outro docente
+    return {"acesso": "concedido", "registo_id": registo["id"], "nome": cartao["nome"], "perfil": cartao["perfil"]}
 
 
 # Comandos pendentes (abertura remota). Chamado a cada ~5 s, serve tambem de heartbeat.
@@ -419,9 +420,22 @@ def evento_dispositivo():
     if tipo == "passagem":
         sentido = ler_opcao(evento.get("sentido"), "sentido", ("entrada", "saida"))
 
-        # Cada acesso concedido autoriza uma entrada: liga-a ao acesso recente que ainda nao foi usado
+        # Aula a decorrer (porta aberta): todas as entradas sao autorizadas e ficam ligadas
+        # ao acesso que abriu a sala. Sala fechada: cada acesso concedido autoriza uma entrada.
         registo_id = None
-        if sentido == "entrada":
+        aula_a_decorrer = con.execute(
+            "SELECT porta_aberta FROM dispositivos WHERE id = %s", (dispositivo["id"],)
+        ).fetchone()["porta_aberta"]
+        if sentido == "entrada" and aula_a_decorrer:
+            registo = con.execute(
+                """SELECT id FROM registos_acesso
+                   WHERE dispositivo_id = %s AND resultado = 'concedido'
+                   ORDER BY data_hora DESC
+                   LIMIT 1""",
+                (dispositivo["id"],),
+            ).fetchone()
+            registo_id = registo["id"] if registo else None
+        elif sentido == "entrada":
             registo = con.execute(
                 """SELECT r.id FROM registos_acesso r
                    WHERE r.dispositivo_id = %s AND r.resultado = 'concedido'

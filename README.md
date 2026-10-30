@@ -17,9 +17,10 @@ adc/                     app Android (abrir esta pasta no Android Studio)
 1. O utilizador passa o cartão; o Arduino envia o UID para `POST /api/access`.
 2. A API verifica se o cartão está **ativo** e se o dia/hora está dentro das suas **permissões** (os administradores entram a qualquer hora). Regista sempre a tentativa e responde concedido/negado.
 3. Um cartão desconhecido fica **pendente**: o administrador aprova-o na app e associa-o a um utilizador.
-4. Os **2 sensores** (A fora, B dentro) detetam o sentido de cada passagem. Cada acesso concedido autoriza **uma** entrada; se entrar mais gente do que cartões passados é criado um alerta `entrada_sem_acesso`.
-5. A app pode pedir a **abertura remota**: a API cria um comando, que o Arduino recolhe a cada 5 s.
-6. Alertas: 3 tentativas negadas seguidas, dispositivo sem contacto há mais de 60 s, entrada sem acesso.
+4. **Aula:** o cartão do docente abre a sala e a porta fica aberta. Só volta a trancar quando o **mesmo cartão** passa outra vez, ou quando passa o cartão de um funcionário (perfil admin). Durante a aula, os outros cartões só veem "Aula a decorrer".
+5. Os **2 sensores** (A fora, B dentro) contam as entradas e saídas de todos (docente e alunos); o Serial Monitor mostra as pessoas dentro e um resumo no fim da aula. Com a aula a decorrer todas as entradas são autorizadas; com a sala fechada, uma entrada sem cartão cria um alerta `entrada_sem_acesso`.
+6. A app pode pedir a **abertura remota**: a API cria um comando, que o Arduino recolhe a cada 5 s. A sala fica aberta até passar o cartão de um funcionário.
+7. Alertas: 3 tentativas negadas seguidas, dispositivo sem contacto há mais de 60 s, entrada sem acesso.
 
 ## 1. Base de dados
 
