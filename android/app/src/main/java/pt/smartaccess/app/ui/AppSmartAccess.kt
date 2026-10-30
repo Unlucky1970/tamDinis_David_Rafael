@@ -7,8 +7,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,8 +51,9 @@ fun AppSmartAccess(sessaoViewModel: SessaoViewModel = viewModel()) {
 
 private enum class Separador(val titulo: String, val icone: ImageVector, val soAdmin: Boolean) {
     PAINEL("Painel", Icons.Default.Home, false),
+    AULAS("Aulas", Icons.Default.DateRange, false),
     REGISTOS("Registos", Icons.AutoMirrored.Filled.List, false),
-    CARTOES("Cartoes", Icons.Default.AccountBox, true),
+    GESTAO("Gestao", Icons.Default.Settings, true),
     ALERTAS("Alertas", Icons.Default.Warning, true),
 }
 
@@ -71,7 +73,7 @@ private fun EcraPrincipal(utilizador: Utilizador, aoSair: () -> Unit) {
                     Column {
                         Text(atual.titulo)
                         Text(
-                            "${utilizador.nome} (${utilizador.perfil})",
+                            "${utilizador.nome} (${textoPerfil(utilizador.perfil)})",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -100,8 +102,9 @@ private fun EcraPrincipal(utilizador: Utilizador, aoSair: () -> Unit) {
         Box(Modifier.fillMaxSize().padding(margens)) {
             when (atual) {
                 Separador.PAINEL -> PainelScreen(utilizador, snackbar, viewModel(key = "painel-$chave"))
+                Separador.AULAS -> AulasScreen(utilizador, snackbar, viewModel(key = "aulas-$chave"))
                 Separador.REGISTOS -> RegistosScreen(utilizador, snackbar, viewModel(key = "registos-$chave"))
-                Separador.CARTOES -> CartoesScreen(snackbar, viewModel(key = "cartoes-$chave"))
+                Separador.GESTAO -> GestaoScreen(utilizador, snackbar, chave)
                 Separador.ALERTAS -> AlertasScreen(snackbar, viewModel(key = "alertas-$chave"))
             }
         }

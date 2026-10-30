@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
+import pt.smartaccess.app.data.Permissao
 import pt.smartaccess.app.data.mensagemErro
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -147,7 +148,51 @@ fun textoMotivo(motivo: String?): String = when (motivo) {
     "cartao_pendente" -> "Cartao por aprovar"
     "cartao_revogado" -> "Cartao revogado"
     "fora_do_horario" -> "Fora do horario"
+    "aula_a_decorrer" -> "Aula de outro docente a decorrer"
+    "inicio_aula" -> "Inicio de aula"
+    "fim_aula" -> "Fim de aula"
     "abertura_remota" -> "Abertura remota"
     null -> ""
     else -> motivo
 }
+
+val PERFIS = listOf("admin", "funcionario", "docente")
+
+fun textoPerfil(perfil: String?): String = when (perfil) {
+    "admin" -> "Docente administrador"
+    "funcionario" -> "Funcionario"
+    "docente" -> "Docente"
+    null -> ""
+    else -> perfil
+}
+
+fun descricaoPerfil(perfil: String): String = when (perfil) {
+    "admin" -> "Entra a qualquer hora, fecha qualquer aula e gere tudo na app"
+    "funcionario" -> "Horario alargado, pode fechar qualquer aula"
+    "docente" -> "So no seu horario, so fecha a aula que abriu"
+    else -> ""
+}
+
+fun textoMotivoFim(motivo: String?): String = when (motivo) {
+    "dono" -> "pelo dono da aula"
+    "admin" -> "por um administrador"
+    "funcionario" -> "por um funcionario"
+    "offline" -> "sem rede, no proprio Arduino"
+    "sistema" -> "pelo sistema (porta reiniciada)"
+    else -> ""
+}
+
+// Minutos entre duas datas ISO 8601 (fim a null = agora), ex.: "1 h 05 min"
+fun duracao(inicio: String, fim: String?): String =
+    runCatching {
+        val de = OffsetDateTime.parse(inicio)
+        val ate = fim?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
+        val minutos = java.time.Duration.between(de, ate).toMinutes().coerceAtLeast(0)
+        if (minutos < 60) "$minutos min" else "${minutos / 60} h %02d min".format(minutos % 60)
+    }.getOrDefault("")
+
+// Horario em texto, ex.: "Seg 08:00-20:00, Ter 08:00-20:00"
+fun textoHorario(permissoes: List<Permissao>): String =
+    permissoes.sortedBy { it.diaSemana }.joinToString(", ") {
+        "${DIAS_SEMANA[it.diaSemana - 1]} ${it.horaInicio}-${it.horaFim}"
+    }

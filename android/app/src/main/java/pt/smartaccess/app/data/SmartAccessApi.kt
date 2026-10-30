@@ -56,6 +56,28 @@ interface SmartAccessApi {
     @GET("api/users")
     suspend fun utilizadores(): List<Utilizador>
 
+    @POST("api/users")
+    suspend fun criarUtilizador(@Body novo: NovoUtilizador): Utilizador
+
+    @PATCH("api/users/{id}")
+    suspend fun alterarUtilizador(@Path("id") id: Long, @Body alteracao: AlteracaoUtilizador): Utilizador
+
+    @GET("api/devices")
+    suspend fun dispositivos(): List<DispositivoGestao>
+
+    @PATCH("api/devices/{id}")
+    suspend fun alterarDispositivo(@Path("id") id: Long, @Body alteracao: AlteracaoDispositivo): DispositivoGestao
+
+    @GET("api/classes")
+    suspend fun aulas(@Query("limite") limite: Int = 50): List<Aula>
+
+    @GET("api/schedules")
+    suspend fun horarios(): HorariosPerfis
+
+    // perfil: docente | funcionario
+    @PUT("api/schedules/{perfil}")
+    suspend fun definirHorario(@Path("perfil") perfil: String, @Body horario: List<Permissao>): List<Permissao>
+
     companion object {
         // Token JWT da sessao atual (definido pelo SessaoViewModel)
         @Volatile

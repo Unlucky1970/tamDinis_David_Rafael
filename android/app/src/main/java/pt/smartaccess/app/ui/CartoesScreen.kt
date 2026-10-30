@@ -17,17 +17,14 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pt.smartaccess.app.data.Cartao
-import pt.smartaccess.app.data.Permissao
 import pt.smartaccess.app.data.Utilizador
 
 @Composable
@@ -63,7 +59,7 @@ fun CartoesScreen(snackbar: SnackbarHostState, viewModel: CartoesViewModel) {
                     val dono = utilizadores.firstOrNull { it.id == cartao.utilizadorId }
                     CartaoItem(
                         cartao = cartao,
-                        donoAdmin = dono?.admin == true,
+                        donoPerfil = dono?.perfil,
                         aoAprovar = { aAprovar = cartao },
                         aoRevogar = { aRevogar = cartao },
                         aoReativar = { viewModel.reativar(cartao) },
@@ -103,7 +99,9 @@ fun CartoesScreen(snackbar: SnackbarHostState, viewModel: CartoesViewModel) {
 
     horarios?.let { cartao ->
         DialogoHorarios(
-            cartao = cartao,
+            titulo = "Horario de ${cartao.uid}",
+            permissoes = cartao.permissoes,
+            aviso = "Horario proprio deste cartao. Sem nenhum dia marcado, o cartao usa o horario do perfil do dono.",
             aoFechar = { horarios = null },
             aoGuardar = {
                 viewModel.guardarHorarios(cartao, it)
@@ -116,7 +114,7 @@ fun CartoesScreen(snackbar: SnackbarHostState, viewModel: CartoesViewModel) {
 @Composable
 private fun CartaoItem(
     cartao: Cartao,
-    donoAdmin: Boolean,
+    donoPerfil: String?,
     aoAprovar: () -> Unit,
     aoRevogar: () -> Unit,
     aoReativar: () -> Unit,
@@ -140,18 +138,19 @@ private fun CartaoItem(
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
-            Text(cartao.utilizador ?: "Sem utilizador associado", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                cartao.utilizador?.let { "$it (${textoPerfil(donoPerfil)})" } ?: "Sem utilizador associado",
+                style = MaterialTheme.typography.bodyMedium,
+            )
             Text("Lido em ${formatarData(cartao.criadoEm)}", style = MaterialTheme.typography.bodySmall)
 
             if (cartao.estado == "ativo") {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
-                        donoAdmin -> "Administrador: acesso a qualquer hora"
-                        cartao.permissoes.isEmpty() -> "Sem horarios definidos (acesso negado)"
-                        else -> cartao.permissoes.joinToString(", ") {
-                            "${DIAS_SEMANA[it.diaSemana - 1]} ${it.horaInicio}-${it.horaFim}"
-                        }
+                        donoPerfil == "admin" -> "Administrador: acesso a qualquer hora"
+                        cartao.permissoes.isEmpty() -> "Horario do perfil (${textoPerfil(donoPerfil)})"
+                        else -> "Horario proprio: ${textoHorario(cartao.permissoes)}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -198,7 +197,7 @@ private fun DialogoAprovar(
                         Spacer(Modifier.width(8.dp))
                         Column {
                             Text(u.nome)
-                            Text(u.email, style = MaterialTheme.typography.bodySmall)
+                            Text("${textoPerfil(u.perfil)} - ${u.email}", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -211,70 +210,3 @@ private fun DialogoAprovar(
     )
 }
 
-private data class LinhaHorario(val ativo: Boolean, val inicio: String, val fim: String)
-
-private val FORMATO_HORA = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
-
-// Uma janela por dia da semana (se o cartao tiver varias no mesmo dia, so a primeira e editada)
-@Composable
-private fun DialogoHorarios(
-    cartao: Cartao,
-    aoFechar: () -> Unit,
-    aoGuardar: (List<Permissao>) -> Unit,
-) {
-    val linhas = remember {
-        mutableStateListOf<LinhaHorario>().apply {
-            for (dia in 1..7) {
-                val p = cartao.permissoes.firstOrNull { it.diaSemana == dia }
-                add(LinhaHorario(p != null, p?.horaInicio ?: "08:00", p?.horaFim ?: "20:00"))
-            }
-        }
-    }
-    var erro by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = aoFechar,
-        title = { Text("Horarios de ${cartao.uid}") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                linhas.forEachIndexed { i, linha ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = linha.ativo, onCheckedChange = { linhas[i] = linha.copy(ativo = it) })
-                        Text(DIAS_SEMANA[i], modifier = Modifier.width(36.dp))
-                        CampoHora(linha.inicio, linha.ativo) { linhas[i] = linha.copy(inicio = it) }
-                        Text(" - ")
-                        CampoHora(linha.fim, linha.ativo) { linhas[i] = linha.copy(fim = it) }
-                    }
-                }
-                erro?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val ativas = linhas.withIndex().filter { it.value.ativo }
-                val invalida = ativas.firstOrNull { (_, l) ->
-                    !FORMATO_HORA.matches(l.inicio) || !FORMATO_HORA.matches(l.fim) || l.fim <= l.inicio
-                }
-                if (invalida != null) {
-                    erro = "${DIAS_SEMANA[invalida.index]}: use HH:MM e um fim depois do inicio"
-                } else {
-                    aoGuardar(ativas.map { (i, l) -> Permissao(i + 1, l.inicio, l.fim) })
-                }
-            }) { Text("Guardar") }
-        },
-        dismissButton = { TextButton(onClick = aoFechar) { Text("Cancelar") } },
-    )
-}
-
-@Composable
-private fun CampoHora(valor: String, ativo: Boolean, aoMudar: (String) -> Unit) {
-    OutlinedTextField(
-        value = valor,
-        onValueChange = { if (it.length <= 5) aoMudar(it) },
-        enabled = ativo,
-        singleLine = true,
-        placeholder = { Text("HH:MM") },
-        textStyle = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.width(76.dp),
-    )
-}

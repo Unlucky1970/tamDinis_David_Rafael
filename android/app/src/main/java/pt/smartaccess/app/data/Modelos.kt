@@ -17,7 +17,21 @@ data class PedidoLogin(val email: String, val password: String)
 
 data class RespostaLogin(val token: String, val utilizador: Utilizador)
 
-// GET /api/status
+// perfil: admin (docente administrador) | funcionario | docente
+data class NovoUtilizador(
+    val nome: String,
+    val email: String,
+    val password: String,
+    val perfil: String,
+)
+
+// Campos a null nao sao enviados (o Gson omite-os)
+data class AlteracaoUtilizador(
+    val nome: String? = null,
+    val perfil: String? = null,
+)
+
+// GET /api/status (so as portas ativas)
 data class Dispositivo(
     val id: Long,
     val nome: String,
@@ -26,6 +40,59 @@ data class Dispositivo(
     @SerializedName("ultimo_contacto") val ultimoContacto: String?,
     val online: Boolean,
     @SerializedName("ultimo_acesso") val ultimoAcesso: UltimoAcesso?,
+    val aula: AulaAtual?,
+)
+
+// Aula a decorrer numa porta (dentro de /api/status)
+data class AulaAtual(
+    val id: Long,
+    val inicio: String,
+    val dono: String?,
+    @SerializedName("dono_perfil") val donoPerfil: String?,
+    val entradas: Int,
+    val saidas: Int,
+)
+
+// GET /api/devices (todas as portas, incluindo as pendentes); estado: pendente | ativo | revogado
+data class DispositivoGestao(
+    val id: Long,
+    val nome: String,
+    val mac: String?,
+    val estado: String,
+    @SerializedName("porta_aberta") val portaAberta: Boolean,
+    @SerializedName("pessoas_dentro") val pessoasDentro: Int,
+    @SerializedName("ultimo_contacto") val ultimoContacto: String?,
+    @SerializedName("criado_em") val criadoEm: String,
+    val online: Boolean,
+)
+
+data class AlteracaoDispositivo(
+    val estado: String? = null,
+    val nome: String? = null,
+)
+
+// GET /api/classes; motivo_fim: dono | admin | funcionario | offline | sistema
+data class Aula(
+    val id: Long,
+    val dispositivo: String,
+    val dono: String?,
+    @SerializedName("dono_perfil") val donoPerfil: String?,
+    @SerializedName("cartao_uid") val cartaoUid: String?,
+    val inicio: String,
+    val fim: String?,
+    @SerializedName("fechada_por") val fechadaPor: String?,
+    @SerializedName("motivo_fim") val motivoFim: String?,
+    val entradas: Int,
+    val saidas: Int,
+    @SerializedName("entradas_nao_detetadas") val entradasNaoDetetadas: Int,
+) {
+    val aDecorrer: Boolean get() = fim == null
+}
+
+// GET /api/schedules (o admin entra sempre, nao tem horario)
+data class HorariosPerfis(
+    val docente: List<Permissao>,
+    val funcionario: List<Permissao>,
 )
 
 data class UltimoAcesso(

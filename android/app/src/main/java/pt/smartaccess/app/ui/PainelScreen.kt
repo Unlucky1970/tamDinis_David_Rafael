@@ -67,8 +67,13 @@ fun PainelScreen(utilizador: Utilizador, snackbar: SnackbarHostState, viewModel:
     aConfirmar?.let { dispositivo ->
         AlertDialog(
             onDismissRequest = { aConfirmar = null },
-            title = { Text("Abrir porta?") },
-            text = { Text("A porta de ${dispositivo.nome} vai ser destrancada durante 5 segundos.") },
+            title = { Text("Abrir ${dispositivo.nome}?") },
+            text = {
+                Text(
+                    "A porta e destrancada e comeca uma aula em seu nome. " +
+                        "Fica aberta ate ser fechada com o cartao de um administrador ou de um funcionario."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.abrirPorta(dispositivo)
@@ -106,9 +111,20 @@ private fun CartaoDispositivo(
             }
             Spacer(Modifier.height(12.dp))
 
-            Linha("Porta", if (dispositivo.portaAberta) "Aberta" else "Fechada")
+            Linha("Porta", if (dispositivo.portaAberta) "Aberta" else "Trancada")
             Linha("Pessoas dentro", dispositivo.pessoasDentro.toString())
             dispositivo.ultimoContacto?.let { Linha("Ultimo contacto", formatarData(it)) }
+
+            dispositivo.aula?.let { aula ->
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                Text("Aula a decorrer", style = MaterialTheme.typography.labelLarge, color = verde)
+                Text(
+                    aula.dono?.let { "$it (${textoPerfil(aula.donoPerfil)})" } ?: "Abertura sem dono",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Linha("Desde", "${formatarData(aula.inicio).takeLast(5)} (${duracao(aula.inicio, null)})")
+                Linha("Entradas / saidas", "${aula.entradas} / ${aula.saidas}")
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Text("Ultimo acesso", style = MaterialTheme.typography.labelLarge)
