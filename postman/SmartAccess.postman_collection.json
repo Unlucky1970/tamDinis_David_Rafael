@@ -5,7 +5,7 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "https://smartaccessrc522.vercel.app" },
+    { "key": "baseUrl", "value": "https://tam-dinis-david-rafael.vercel.app" },
     { "key": "macTeste", "value": "AA:BB:CC:00:00:01" },
     { "key": "apiKey", "value": "" },
     { "key": "token", "value": "" },
