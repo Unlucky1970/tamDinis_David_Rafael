@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/api/alerts?resolvido=false"
+method: GET
+queryParams:
+  resolvido: "false"
+scripts:
+  - type: afterResponse
+    code: |-
+      const lista = pm.response.json();
+      if (Array.isArray(lista) && lista.length > 0) pm.collectionVariables.set('alertaId', lista[0].id);
+    language: text/javascript
+order: 1000

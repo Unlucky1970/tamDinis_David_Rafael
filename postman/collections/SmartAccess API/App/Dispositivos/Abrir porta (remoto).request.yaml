@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/door/unlock"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"dispositivo_id":{{dispositivoId}}}'
+scripts:
+  - type: afterResponse
+    code: if (pm.response.code === 202) pm.collectionVariables.set('comandoId', pm.response.json().comando_id);
+    language: text/javascript
+order: 5000

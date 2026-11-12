@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/door/commands/{{comandoId}}"
+method: GET
+order: 6000

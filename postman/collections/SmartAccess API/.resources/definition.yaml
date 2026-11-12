@@ -1,0 +1,31 @@
+$kind: collection
+description: |-
+  Testes da API SmartAccess (Flask no Vercel).
+
+  So o administrador tem conta na app; docentes e funcionarios sao so um nome associado ao cartao.
+
+  Ordem sugerida:
+  1. **App > Login admin**: o token fica guardado em `token` e e usado na pasta App.
+  2. **Arduino > Registar dispositivo de teste**: simula um Arduino novo; a chave fica guardada em `apiKey`.
+  3. **App > Dispositivos > Dispositivos** e depois **Aprovar dispositivo**.
+  4. A partir dai a pasta **Arduino** funciona como um Arduino real.
+
+  Os ids (`dispositivoId`, `comandoId`, `cartaoId`, `alertaId`, `utilizadorId`) sao guardados pelos pedidos que os devolvem; podes muda-los em *Variables*.
+
+  Perfis: admin (docente administrador), funcionario, docente.
+variables:
+  baseUrl: https://tam-dinis-david-rafael.vercel.app
+  macTeste: AA:BB:CC:00:00:01
+  apiKey: ""
+  token: ""
+  dispositivoId: "1"
+  comandoId: "1"
+  cartaoId: "1"
+  alertaId: "1"
+  utilizadorId: "1"
+auth:
+  - id: dcfe8dc1-ce58-4ec1-9c9d-739610af3c86
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{token}}"

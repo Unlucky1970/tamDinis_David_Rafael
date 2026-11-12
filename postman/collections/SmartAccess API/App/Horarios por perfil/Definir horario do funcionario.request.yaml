@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/schedules/funcionario"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    [
+      {"dia_semana":1,"hora_inicio":"07:00","hora_fim":"23:00"},
+      {"dia_semana":2,"hora_inicio":"07:00","hora_fim":"23:00"},
+      {"dia_semana":3,"hora_inicio":"07:00","hora_fim":"23:00"},
+      {"dia_semana":4,"hora_inicio":"07:00","hora_fim":"23:00"},
+      {"dia_semana":5,"hora_inicio":"07:00","hora_fim":"23:00"},
+      {"dia_semana":6,"hora_inicio":"07:00","hora_fim":"23:00"}
+    ]
+order: 3000

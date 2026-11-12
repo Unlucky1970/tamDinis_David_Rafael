@@ -2,6 +2,10 @@
 workspace:
   id: 236ff89b-76ff-4cc9-9222-5c4e16683c00
 
+cloudResources:
+  collections:
+    ../postman/collections/SmartAccess API: e18dfcad-6dc4-4c51-a629-e280ff3c1a20
+
 # All resources in the `postman/` folder are automatically registered in Local View.
 # Point to additional files outside the `postman/` folder to register them individually. Example:
 #localResources:

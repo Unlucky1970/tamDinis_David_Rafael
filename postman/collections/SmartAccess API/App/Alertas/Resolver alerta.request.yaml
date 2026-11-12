@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/alerts/{{alertaId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"resolvido":true}'
+order: 2000

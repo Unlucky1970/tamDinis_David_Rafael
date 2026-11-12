@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/users"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"nome":"Segundo Admin","perfil":"admin","email":"admin2@smartaccess.pt","password":"admin456"}'
+order: 4000

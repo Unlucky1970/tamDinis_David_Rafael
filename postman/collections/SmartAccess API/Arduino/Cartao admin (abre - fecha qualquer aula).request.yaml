@@ -1,0 +1,10 @@
+$kind: http-request
+name: Cartao admin (abre / fecha qualquer aula)
+url: "{{baseUrl}}/api/access"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"uid":"8DF36E69"}'
+order: 3000

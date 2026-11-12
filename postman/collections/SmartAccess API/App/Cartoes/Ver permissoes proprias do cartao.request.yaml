@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
+method: GET
+order: 6000

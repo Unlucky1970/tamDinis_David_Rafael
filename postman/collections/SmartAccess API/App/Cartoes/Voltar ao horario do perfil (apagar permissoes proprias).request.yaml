@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "[]"
+order: 8000

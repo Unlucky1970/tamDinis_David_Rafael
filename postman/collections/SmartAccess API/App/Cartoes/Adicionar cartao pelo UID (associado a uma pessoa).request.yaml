@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"uid":"4A7B2C91","utilizador_id":{{utilizadorId}}}'
+scripts:
+  - type: afterResponse
+    code: if (pm.response.code === 201) pm.collectionVariables.set('cartaoId', pm.response.json().id);
+    language: text/javascript
+order: 2000

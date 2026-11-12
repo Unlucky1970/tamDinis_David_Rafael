@@ -1,0 +1,11 @@
+$kind: collection
+description: Pedidos que o Arduino faz. Autenticacao pelo cabecalho x-api-key (a chave vem do registo).
+auth:
+  - id: 611d5641-cbcd-4a08-98dc-a91e74d0bcb0
+    type: apikey
+    name: apikey auth
+    credentials:
+      key: x-api-key
+      value: "{{apiKey}}"
+      in: header
+order: 2000

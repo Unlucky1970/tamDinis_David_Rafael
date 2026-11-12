@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/devices/{{dispositivoId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"estado":"ativo","nome":"Sala 1.04"}'
+order: 2000

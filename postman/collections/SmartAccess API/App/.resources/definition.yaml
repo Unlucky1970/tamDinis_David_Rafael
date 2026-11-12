@@ -1,0 +1,3 @@
+$kind: collection
+description: Pedidos da app Android. Autenticacao por Bearer token (corre primeiro um Login).
+order: 3000

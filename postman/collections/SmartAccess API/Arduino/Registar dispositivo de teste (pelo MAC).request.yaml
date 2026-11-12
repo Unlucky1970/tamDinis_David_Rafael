@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/device/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"mac":"{{macTeste}}"}'
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      if (pm.response.code === 201) {
+        pm.collectionVariables.set('apiKey', pm.response.json().api_key);
+      }
+    language: text/javascript
+order: 1000

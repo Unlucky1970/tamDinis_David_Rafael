@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/device/events"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"tipo":"porta","aberta":false}'
+order: 10000

@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards/{{cartaoId}}/permissions"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    [
+      {"dia_semana":1,"hora_inicio":"10:00","hora_fim":"12:00"},
+      {"dia_semana":3,"hora_inicio":"14:00","hora_fim":"18:00"}
+    ]
+order: 7000

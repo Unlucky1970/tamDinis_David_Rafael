@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/devices/{{dispositivoId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"estado":"revogado"}'
+order: 3000

@@ -1,0 +1,7 @@
+$kind: http-request
+url: "{{baseUrl}}/api/logs?resultado=negado&limite=50"
+method: GET
+queryParams:
+  resultado: negado
+  limite: "50"
+order: 3000

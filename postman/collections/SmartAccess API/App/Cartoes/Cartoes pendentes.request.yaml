@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards?estado=pendente"
+method: GET
+queryParams:
+  estado: pendente
+scripts:
+  - type: afterResponse
+    code: |-
+      const lista = pm.response.json();
+      if (Array.isArray(lista) && lista.length > 0) pm.collectionVariables.set('cartaoId', lista[0].id);
+    language: text/javascript
+order: 3000

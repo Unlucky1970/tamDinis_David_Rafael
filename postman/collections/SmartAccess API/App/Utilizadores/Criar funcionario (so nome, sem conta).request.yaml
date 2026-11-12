@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/users"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"nome":"Marta Silva","perfil":"funcionario"}'
+scripts:
+  - type: afterResponse
+    code: if (pm.response.code === 201) pm.collectionVariables.set('utilizadorId', pm.response.json().id);
+    language: text/javascript
+order: 3000

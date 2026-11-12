@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/cards/{{cartaoId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"estado":"ativo","utilizador_id":{{utilizadorId}}}'
+order: 4000

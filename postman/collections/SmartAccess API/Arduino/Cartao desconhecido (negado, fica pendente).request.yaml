@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/access"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"uid":"AAAAAAAA"}'
+order: 5000

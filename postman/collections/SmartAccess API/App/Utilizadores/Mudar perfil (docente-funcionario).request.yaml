@@ -1,0 +1,10 @@
+$kind: http-request
+name: Mudar perfil (docente/funcionario)
+url: "{{baseUrl}}/api/users/{{utilizadorId}}"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"perfil":"docente"}'
+order: 5000

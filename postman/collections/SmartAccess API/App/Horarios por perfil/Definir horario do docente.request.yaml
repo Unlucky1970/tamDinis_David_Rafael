@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/schedules/docente"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    [
+      {"dia_semana":1,"hora_inicio":"08:00","hora_fim":"20:00"},
+      {"dia_semana":2,"hora_inicio":"08:00","hora_fim":"20:00"},
+      {"dia_semana":3,"hora_inicio":"08:00","hora_fim":"20:00"},
+      {"dia_semana":4,"hora_inicio":"08:00","hora_fim":"20:00"},
+      {"dia_semana":5,"hora_inicio":"08:00","hora_fim":"20:00"}
+    ]
+order: 2000

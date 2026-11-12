@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/device/commands"
+method: GET
+order: 6000
