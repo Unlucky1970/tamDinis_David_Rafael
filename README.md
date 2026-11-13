@@ -5,9 +5,9 @@ Controlo de acesso a salas de aula com cartões RFID: Arduino + API em Python (F
 ```
 arduino/arduino.ino      sketch do Arduino (RFID, 2 sensores HC-SR04, servo, LEDs, LCD, buzzer)
 api/index.py             API REST (um único ficheiro Python)
+app.py                   ponto de entrada no Vercel (importa a app de api/index.py)
 requirements.txt         dependências da API
-vercel.json              encaminha todas as rotas para api/index.py
-db/schema.sql            tabelas, índices e trigger de registos imutáveis (cria ou atualiza a base)
+db/schema.sql            tabelas, índices e trigger de registos imutáveis
 db/seed.sql              utilizadores, horários e cartões de teste
 postman/                 coleção do Postman com todos os pedidos
 android/                 app Android (abrir esta pasta no Android Studio)
@@ -48,22 +48,16 @@ O Arduino não tem chaves nem ids no código: o mesmo sketch serve para qualquer
 
 ## 1. Base de dados
 
-Cria uma base PostgreSQL (no Vercel: *Storage → Create → Neon Postgres*) e executa, por esta ordem:
+A API usa **uma** base PostgreSQL, indicada pela variável `DATABASE_URL`. Qualquer fornecedor de PostgreSQL serve (Neon, Supabase, um servidor próprio…): o código é o mesmo, só muda o URL de ligação.
+
+Para criar as tabelas, executa por esta ordem:
 
 ```bash
 psql "$DATABASE_URL" -f db/schema.sql
 psql "$DATABASE_URL" -f db/seed.sql
 ```
 
-(Ou cola o conteúdo dos dois ficheiros no SQL Editor da Neon.)
-
-O `schema.sql` serve tanto para uma base nova como para **atualizar** uma base da versão anterior, e pode ser executado mais do que uma vez. Na atualização, o perfil antigo `utilizador` passa a `docente`.
-
-Se a base tiver um dispositivo criado à mão nas versões anteriores (com a chave que estava no repositório), revoguem-no:
-
-```sql
-UPDATE dispositivos SET estado = 'revogado' WHERE mac IS NULL;
-```
+(Ou cola o conteúdo dos dois ficheiros no SQL Editor do fornecedor.) Os dois ficheiros podem ser executados mais do que uma vez.
 
 Dados de teste do `seed.sql` (**mudar antes da entrega**):
 
@@ -79,7 +73,7 @@ Dados de teste do `seed.sql` (**mudar antes da entrega**):
 
 1. Importar o repositório no Vercel (deteta o Python pelo `requirements.txt`).
 2. Em *Settings → Environment Variables* definir:
-   - `DATABASE_URL` (se usaram o Neon pelo Vercel, `POSTGRES_URL` já existe e também funciona)
+   - `DATABASE_URL`: URL de ligação à base PostgreSQL (`POSTGRES_URL` também é aceite)
    - `JWT_SECRET`: texto longo e aleatório
    - `FUSO_HORARIO` (opcional, por omissão `Europe/Lisbon`)
 
@@ -209,9 +203,9 @@ Só os administradores entram na app. Separadores:
 | **Aulas** | histórico de aulas: porta, dono, duração, entradas, saídas, entradas não detetadas, quem fechou |
 | **Registos** | acessos com filtros por período, resultado e pessoa |
 | **Gestão** | **Portas** (aprovar Arduinos novos e dar-lhes nome, revogar), **Cartões** (pesquisa por UID ou nome, filtros por estado; adicionar pelo UID, aprovar os lidos nas portas, revogar, horário próprio), **Pessoas** (pesquisa e filtro por perfil; cada pessoa mostra os seus cartões e tem "Associar cartão"; criar docentes/funcionários só com nome, ou admins com conta; mudar perfil) e **Horários** (do docente e do funcionário) |
+| **Alertas** | alertas por resolver (inclui portas novas à espera de aprovação) |
 
 Ao associar um cartão (em Cartões ou em Pessoas), a pessoa escolhe-se **pesquisando pelo nome**. Se ninguém tiver esse nome, aparece "Criar «nome»": a pessoa é criada ali mesmo (docente ou funcionário) e fica logo com o cartão.
-| **Alertas** | alertas por resolver (inclui portas novas à espera de aprovação) |
 
 ## Por fazer
 

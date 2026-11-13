@@ -1,6 +1,6 @@
 -- SmartAccess - esquema PostgreSQL
--- Serve para criar a base de raiz E para atualizar uma base antiga: pode ser executado varias vezes.
--- (ex.: psql "$DATABASE_URL" -f db/schema.sql, ou colar no SQL Editor da Neon)
+-- Cria as tabelas que ainda nao existirem: pode ser executado varias vezes.
+-- (ex.: psql "$DATABASE_URL" -f db/schema.sql, ou colar no SQL Editor do fornecedor)
 
 -- ======================================================
 --  UTILIZADORES E HORARIOS
@@ -16,21 +16,12 @@ CREATE TABLE IF NOT EXISTS utilizadores (
   email          TEXT,                               -- so o admin
   password_hash  TEXT,                               -- bcrypt, so o admin
   perfil         TEXT        NOT NULL DEFAULT 'docente',
-  criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
+  criado_em      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT perfil_valido CHECK (perfil IN ('admin', 'funcionario', 'docente')),
+  CONSTRAINT admin_tem_conta CHECK (perfil <> 'admin' OR (email IS NOT NULL AND password_hash IS NOT NULL))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS utilizadores_email_idx ON utilizadores (lower(email));
-
--- Atualizacao: o antigo perfil 'utilizador' passa a 'docente'; so o admin precisa de email e palavra-passe
-ALTER TABLE utilizadores DROP CONSTRAINT IF EXISTS perfil_valido;
-UPDATE utilizadores SET perfil = 'docente' WHERE perfil = 'utilizador';
-ALTER TABLE utilizadores ALTER COLUMN perfil SET DEFAULT 'docente';
-ALTER TABLE utilizadores ADD CONSTRAINT perfil_valido CHECK (perfil IN ('admin', 'funcionario', 'docente'));
-ALTER TABLE utilizadores ALTER COLUMN email DROP NOT NULL;
-ALTER TABLE utilizadores ALTER COLUMN password_hash DROP NOT NULL;
-ALTER TABLE utilizadores DROP CONSTRAINT IF EXISTS admin_tem_conta;
-ALTER TABLE utilizadores ADD CONSTRAINT admin_tem_conta
-  CHECK (perfil <> 'admin' OR (email IS NOT NULL AND password_hash IS NOT NULL));
 
 -- Horario por omissao de cada perfil (usado quando o cartao nao tem permissoes proprias).
 -- O admin nao precisa: entra sempre.
@@ -89,17 +80,10 @@ CREATE TABLE IF NOT EXISTS dispositivos (
   ultimo_contacto  TIMESTAMPTZ,
   porta_aberta     BOOLEAN     NOT NULL DEFAULT FALSE,
   pessoas_dentro   INT         NOT NULL DEFAULT 0,
-  criado_em        TIMESTAMPTZ NOT NULL DEFAULT now()
+  criado_em        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT dispositivo_estado_valido CHECK (estado IN ('pendente', 'ativo', 'revogado')),
+  CONSTRAINT mac_valido CHECK (mac IS NULL OR mac ~ '^([0-9A-F]{2}:){5}[0-9A-F]{2}$')
 );
-
--- Atualizacao: os dispositivos criados a mao antes desta versao ficam ativos
-ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS mac TEXT UNIQUE;
-ALTER TABLE dispositivos ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'ativo';
-ALTER TABLE dispositivos ALTER COLUMN estado SET DEFAULT 'pendente';
-ALTER TABLE dispositivos DROP CONSTRAINT IF EXISTS dispositivo_estado_valido;
-ALTER TABLE dispositivos ADD CONSTRAINT dispositivo_estado_valido CHECK (estado IN ('pendente', 'ativo', 'revogado'));
-ALTER TABLE dispositivos DROP CONSTRAINT IF EXISTS mac_valido;
-ALTER TABLE dispositivos ADD CONSTRAINT mac_valido CHECK (mac IS NULL OR mac ~ '^([0-9A-F]{2}:){5}[0-9A-F]{2}$');
 
 -- ======================================================
 --  REGISTOS DE ACESSO (imutaveis)
@@ -165,11 +149,10 @@ CREATE TABLE IF NOT EXISTS passagens (
   dispositivo_id     BIGINT      NOT NULL REFERENCES dispositivos(id),
   sentido            TEXT        NOT NULL,
   registo_acesso_id  BIGINT      REFERENCES registos_acesso(id),   -- acesso que abriu a aula
+  aula_id            BIGINT      REFERENCES aulas(id),
   data_hora          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT sentido_valido CHECK (sentido IN ('entrada', 'saida'))
 );
-
-ALTER TABLE passagens ADD COLUMN IF NOT EXISTS aula_id BIGINT REFERENCES aulas(id);
 
 CREATE INDEX IF NOT EXISTS passagens_registo_idx ON passagens (registo_acesso_id);
 CREATE INDEX IF NOT EXISTS passagens_aula_idx ON passagens (aula_id);
@@ -183,12 +166,10 @@ CREATE TABLE IF NOT EXISTS alertas (
   descricao       TEXT        NOT NULL,
   dispositivo_id  BIGINT      REFERENCES dispositivos(id),
   data_hora       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  resolvido       BOOLEAN     NOT NULL DEFAULT FALSE
+  resolvido       BOOLEAN     NOT NULL DEFAULT FALSE,
+  CONSTRAINT tipo_valido CHECK (tipo IN (
+    'tentativas_negadas', 'dispositivo_offline', 'entrada_sem_acesso', 'dispositivo_novo'))
 );
-
-ALTER TABLE alertas DROP CONSTRAINT IF EXISTS tipo_valido;
-ALTER TABLE alertas ADD CONSTRAINT tipo_valido CHECK (tipo IN (
-  'tentativas_negadas', 'dispositivo_offline', 'entrada_sem_acesso', 'dispositivo_novo'));
 
 CREATE INDEX IF NOT EXISTS alertas_data_idx ON alertas (resolvido, data_hora DESC);
 

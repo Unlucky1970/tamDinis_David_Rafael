@@ -727,7 +727,7 @@ def estado_comando(comando_id: int):
 
 @app.get("/api/logs")
 def registos():
-    utilizador = utilizador_atual()
+    exigir_admin()
     args = request.args
     desde = ler_data(args.get("desde"), "desde")
     ate = ler_data(args.get("ate"), "ate")
@@ -735,12 +735,7 @@ def registos():
     if resultado is not None:
         ler_opcao(resultado, "resultado", ("concedido", "negado"))
     limite = ler_inteiro(args.get("limite", 100), "limite", 1, 500)
-
-    # Um utilizador normal so ve os seus proprios acessos
-    if utilizador["perfil"] == "admin":
-        utilizador_id = ler_inteiro(args["utilizador_id"], "utilizador_id") if args.get("utilizador_id") else None
-    else:
-        utilizador_id = utilizador["id"]
+    utilizador_id = ler_inteiro(args["utilizador_id"], "utilizador_id") if args.get("utilizador_id") else None
 
     return bd().execute(
         """SELECT r.id, r.data_hora, r.cartao_uid, r.utilizador_id, u.nome AS utilizador,
@@ -1001,12 +996,11 @@ def alterar_dispositivo(dispositivo_id: int):
         raise ErroApi(409, "Ja existe um dispositivo com esse nome")
 
 
-# Historico das aulas (um docente ou funcionario so ve as suas)
+# Historico das aulas
 @app.get("/api/classes")
 def listar_aulas():
-    utilizador = utilizador_atual()
+    exigir_admin()
     limite = ler_inteiro(request.args.get("limite", 50), "limite", 1, 500)
-    so_minhas = utilizador["perfil"] != "admin"
     return bd().execute(
         """SELECT a.id, d.nome AS dispositivo, u.nome AS dono, u.perfil AS dono_perfil, a.cartao_uid,
                   a.inicio, a.fim, f.nome AS fechada_por, a.motivo_fim,
@@ -1015,10 +1009,9 @@ def listar_aulas():
            JOIN dispositivos d ON d.id = a.dispositivo_id
            LEFT JOIN utilizadores u ON u.id = a.aberta_por
            LEFT JOIN utilizadores f ON f.id = a.fechada_por
-           WHERE NOT %(so_minhas)s OR a.aberta_por = %(eu)s
            ORDER BY a.inicio DESC
-           LIMIT %(limite)s""",
-        {"so_minhas": so_minhas, "eu": utilizador["id"], "limite": limite},
+           LIMIT %s""",
+        (limite,),
     ).fetchall()
 
 
